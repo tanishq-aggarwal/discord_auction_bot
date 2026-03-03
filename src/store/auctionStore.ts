@@ -100,4 +100,24 @@ export class AuctionStore {
         auction.participants.set(userId, { userId, addedByUserId, addedAt: Date.now() });
         return auction;
     }
+
+    removePlayer(guildId: string, auctionName: string, userId: string) {
+        const auction = this.getByName(guildId, auctionName);
+        if (!auction) throw new Error(`Auction "${auctionName}" not found.`);
+        if (auction.status !== 'OPEN') throw new Error(`Auction "${auctionName}" is closed.`);
+
+        const existed = auction.players.delete(userId);
+        if (!existed) throw new Error('That user is not in the player pool.');
+        return auction;
+        }
+
+    removeParticipant(guildId: string, auctionName: string, userId: string) {
+        const auction = this.getByName(guildId, auctionName);
+        if (!auction) throw new Error(`Auction "${auctionName}" not found.`);
+        if (auction.status !== 'OPEN') throw new Error(`Auction "${auctionName}" is closed.`);
+
+        const existed = auction.participants.delete(userId);
+        if (!existed) throw new Error('That user is not a participant.');
+        return auction;
+    }
 }

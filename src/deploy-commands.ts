@@ -46,6 +46,36 @@ const commands = [
           .setRequired(true),
       ),
   )
+  .addSubcommand(sub =>
+    sub
+      .setName('set-admin-role')
+      .setDescription('Set which role can manage auctions in this server')
+      .addRoleOption(opt =>
+        opt.setName('role').setDescription('Admin role for auction commands').setRequired(true),
+      ),
+  )
+  .addSubcommand(sub =>
+    sub
+      .setName('remove-player')
+      .setDescription('Remove a player from the auction player pool')
+      .addStringOption(opt =>
+        opt.setName('auction_name').setDescription('Auction name').setRequired(true).setAutocomplete(true),
+      )
+      .addUserOption(opt =>
+        opt.setName('player').setDescription('Player to remove').setRequired(true),
+      ),
+  )
+  .addSubcommand(sub =>
+    sub
+      .setName('remove-participant')
+      .setDescription('Remove a participant from the auction')
+      .addStringOption(opt =>
+        opt.setName('auction_name').setDescription('Auction name').setRequired(true).setAutocomplete(true),
+      )
+      .addUserOption(opt =>
+        opt.setName('participant').setDescription('Participant to remove').setRequired(true),
+      ),
+  )
   .toJSON()
 ];
 
@@ -53,5 +83,5 @@ const rest = new REST({ version: '10' }).setToken(token);
 
 (async () => {
   await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body: commands });
-  console.log('Registered /auction create in the test guild.');
+  console.log('Registered /auction commands in the test guild.');
 })();
