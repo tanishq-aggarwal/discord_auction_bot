@@ -16,7 +16,7 @@ export async function addMaster(interaction: ChatInputCommandInteraction) {
                 name: player.tag,
                 iconURL: player.displayAvatarURL(),
             },
-            message: `has been promoted to a master for **${auction.name}** auction.`,
+            description: `has been promoted to a master for **${auction.name}** auction.`,
         }));
     } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to add master. Please try again.';

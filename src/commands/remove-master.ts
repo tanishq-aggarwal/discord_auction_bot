@@ -14,7 +14,7 @@ export async function removeMaster(interaction: ChatInputCommandInteraction) {
                 name: master.tag,
                 iconURL: master.displayAvatarURL(),
             },
-            message: `has been removed as a master from **${auction.name}** auction.`,
+            description: `has been removed as a master from **${auction.name}** auction.`,
         }));
     } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to remove master. Please try again.';

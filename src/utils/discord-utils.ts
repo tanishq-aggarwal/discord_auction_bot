@@ -43,24 +43,44 @@ type EmbedAuthor = {
     iconURL?: string;
 };
 
-export function infoReplyBuilder({ message, ephemeral = false, title, author }: {
+export function infoReplyBuilder({ plaintextMessage, description, ephemeral = false, title, author, thumbnailURL, fields, footer }: {
+    plaintextMessage?: string,
+    description?: string,
     author?: EmbedAuthor,
+    thumbnailURL?: string,
     title?: string,
-    message: string,
+    fields?: Record<string, string>,
+    footer?: string,
     ephemeral?: boolean,
 }): InteractionReplyOptions {
-    const embed = new EmbedBuilder()
-        .setColor(0x60a5fa) // tailwind blue-500
-        .setDescription(message);
+    const embed = new EmbedBuilder().setColor(0x60a5fa); // tailwind blue-500
+    if (description) {
+        embed.setDescription(description);
+    }
     if (title) {
         embed.setTitle(title);
     }
     if (author) {
         embed.setAuthor(author);
     }
+    if (thumbnailURL) {
+        embed.setThumbnail(thumbnailURL);
+    }
+    if (fields) {
+        for (const [key, value] of Object.entries(fields)) {
+            embed.addFields({ name: key, value, inline: true });
+        }
+    }
+    if (footer) {
+        embed.setFooter({ text: footer });
+    }
 
-    return {
+    const replyOptions: InteractionReplyOptions = {
         embeds: [embed],
         flags: ephemeral ? MessageFlags.Ephemeral : undefined,
+    };
+    if (plaintextMessage) {
+        replyOptions.content = plaintextMessage;
     }
+    return replyOptions;
 }

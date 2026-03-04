@@ -33,6 +33,24 @@ const commands = [
       )
       .addUserOption(opt =>
         opt.setName('player').setDescription('Select a user to enslave').setRequired(true),
+      )
+      .addStringOption(opt =>
+        opt.setName('specialties').setDescription('Things this slave is good at').setRequired(false),
+      ),
+  )
+  .addSubcommand(sub =>
+    sub
+      .setName('update-slave-specialties')
+      .setDescription('Set or update the specialties of a slave')
+      .addUserOption(opt =>
+        opt.setName('slave')
+          .setDescription('Select the slave')
+          .setRequired(true),
+      )
+      .addStringOption(opt =>
+        opt.setName('specialties')
+          .setDescription('Specify things this slave is good at')
+          .setRequired(true),
       ),
   )
   .addSubcommand(sub =>

@@ -15,7 +15,7 @@ export async function createAuction(interaction: ChatInputCommandInteraction) {
 
         console.log(`[auction:create] guild=${interaction.guildId} auction=${auctionName}`);
         await interaction.reply(infoReplyBuilder({
-            message: `Auction **${auction.name}** created.`,
+            description: `Auction **${auction.name}** created.`,
         }));
     } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to create auction.';

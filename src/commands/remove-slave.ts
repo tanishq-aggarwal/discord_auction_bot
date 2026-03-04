@@ -14,7 +14,7 @@ export async function removeSlave(interaction: ChatInputCommandInteraction) {
                 name: slave.tag,
                 iconURL: slave.displayAvatarURL(),
             },
-            message: `has been freed from **${auction.name}** auction.`,
+            description: `has been freed from **${auction.name}** auction.`,
         }));
     } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to remove slave. Please try again.';

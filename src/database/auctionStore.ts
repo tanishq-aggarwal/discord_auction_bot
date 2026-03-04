@@ -31,7 +31,7 @@ export type Auction = {
     status: AuctionStatus;
     createdAt: epochMilliseconds;
 
-    slaves: Map<DiscordUser["id"], DiscordUser>;
+    slaves: Map<DiscordUser["id"], Slave>;
     masters: Map<DiscordUser["id"], DiscordUser>;
 
     live?: LiveState;
@@ -41,6 +41,10 @@ export type DiscordUser = {
     tag: string;
     id: string;
 }
+
+export type Slave = DiscordUser & {
+    specialties?: string | undefined;
+};
 
 
 
@@ -94,21 +98,21 @@ export class AuctionStore {
         return guildMap.get(auctionName);
     }
 
-    addSlave(guildId: string, auctionName: string, userId: string, userTag: string): Auction {
+    addSlave(guildId: string, auctionName: string, userId: string, userTag: string, specialties?: string): Auction {
         const auction = this.getByName(guildId, auctionName);
         if (!auction) throw new Error(`Auction **${auctionName}** not found.`);
         if (auction.status === 'LIVE') throw new Error('Cannot modify auction pool/participants after it has already started.');
         else if (auction.status === 'CLOSED') throw new Error('This auction is already over.');
 
         if (auction.masters.has(userId)) {
-            throw new Error('That user is currently a master, and therefore cannot be enslaved.\nRemove them first using the `/auction remove-master` command.');
+            throw new Error('That user is currently a master, and therefore cannot be enslaved.\nDemote them first using the `/auction remove-master` command.');
         }
 
         if (auction.slaves.has(userId)) {
             throw new Error('That user is already in the slave pool.');
         }
 
-        auction.slaves.set(userId, { tag: userTag, id: userId });
+        auction.slaves.set(userId, { tag: userTag, id: userId, specialties });
         return auction;
     }
 
@@ -165,5 +169,19 @@ export class AuctionStore {
         return Array.from(guildMap.values())
                     .filter(auction => auction.status === 'OPEN')
                     .map(auction => auction.name);
+    }
+
+    updateSlaveSpecialties(guildId: string, userId: string, userTag: string, specialties: string) {
+        const auctions = this.byGuildId.get(guildId);
+        if (!auctions) throw new Error(`No auctions found for this server.`);
+
+        let foundSlave = false;
+        for (const auction of auctions.values()) {
+            if (auction.slaves.has(userId)) {
+                auction.slaves.get(userId)!.specialties = specialties;
+                foundSlave = true;
+            }
+        }
+        if (!foundSlave) throw new Error(`**${userTag}** has not been enslaved in any auctions.`);
     }
 }

@@ -22,6 +22,7 @@ import { addSlave } from './commands/add-slave.js';
 import { addMaster } from './commands/add-master.js';
 import { removeMaster } from './commands/remove-master.js';
 import { removeSlave } from './commands/remove-slave.js';
+import { updateSlaveSpecialties } from './commands/update-slave-specialties.js';
 
 
 const ROUND_MS = 2 * 60 * 1000;
@@ -558,6 +559,10 @@ async function handleChatInputInteraction(interaction: ChatInputCommandInteracti
 
     else if (subcommand === 'add-slave') {
         await addSlave(interaction);
+    }
+
+    else if (subcommand === 'update-slave-specialties') {
+        await updateSlaveSpecialties(interaction);
     }
 
     else if (subcommand === 'add-master') {
