@@ -9,5 +9,7 @@ export async function setAdminRole(interaction: ChatInputCommandInteraction) {
     guildConfigs.setAdminRoleId(interaction.guildId!, role.id);
 
     console.log(`[auction:set-admin-role] guild=${interaction.guildId} role=${role.name} (${role.id})`);
-    await interaction.reply(infoReplyBuilder(`Auction management enabled for role **${role.name}**.`));
+    await interaction.reply(infoReplyBuilder({
+        message: `Auction management enabled for role **${role.name}**.`,
+    }));
 }

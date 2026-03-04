@@ -8,12 +8,16 @@ export async function removeSlave(interaction: ChatInputCommandInteraction) {
 
     try {
         const auction = auctions.removeSlave(interaction.guildId!, auctionName, slave.id, slave.tag);
-        console.log(`[auction:remove-slave] guild=${interaction.guildId!} auction=${auctionName} slave=${slave.tag} (${slave.id})`);
-        await interaction.reply(infoReplyBuilder(
-            `Removed **${slave.tag}** from **${auction.name}** slave pool.`,
-        ));
+        console.log(`[auction:remove-slave] guild=${interaction.guildId!} auction=${auctionName} slave=${slave.tag}`);
+        await interaction.reply(infoReplyBuilder({
+            author: {
+                name: slave.tag,
+                iconURL: slave.displayAvatarURL(),
+            },
+            message: `has been freed from **${auction.name}** auction.`,
+        }));
     } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Failed to remove slave.';
-        await interaction.reply(errorReplyBuilder(msg));
+        const message = err instanceof Error ? err.message : 'Failed to remove slave. Please try again.';
+        await interaction.reply(errorReplyBuilder({message}));
     }
 }

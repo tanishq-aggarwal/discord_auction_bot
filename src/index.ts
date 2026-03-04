@@ -513,11 +513,11 @@ async function handleAutocompleteInteraction(interaction: AutocompleteInteractio
 async function handleChatInputInteraction(interaction: ChatInputCommandInteraction) {
     if (interaction.commandName !== 'auction') return;
     if (!interaction.inGuild() || !interaction.guildId) {
-        await interaction.reply(errorReplyBuilder('This command can only be used inside a server.'));
+        await interaction.reply(errorReplyBuilder({message: 'This command can only be used inside a server.'}));
         return;
     }
     if (!interaction.channelId) {
-        await interaction.reply(errorReplyBuilder('This command can only be used inside a server channel.'));
+        await interaction.reply(errorReplyBuilder({message: 'This command can only be used inside a server channel.'}));
         return;
     }
 

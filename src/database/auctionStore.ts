@@ -101,7 +101,7 @@ export class AuctionStore {
         else if (auction.status === 'CLOSED') throw new Error('This auction is already over.');
 
         if (auction.masters.has(userId)) {
-            throw new Error('That user is already a master, so they cannot be added as a slave. Remove them first using the `/auction remove-master` command.');
+            throw new Error('That user is currently a master, and therefore cannot be enslaved.\nRemove them first using the `/auction remove-master` command.');
         }
 
         if (auction.slaves.has(userId)) {
@@ -119,7 +119,7 @@ export class AuctionStore {
         else if (auction.status === 'CLOSED') throw new Error('This auction is already over.');
 
         if (auction.slaves.has(userId)) {
-            throw new Error('That user is already a slave, so they cannot be added as a master. Remove them first using the `/auction remove-slave` command.');
+            throw new Error('That user is currently enslaved, and therefore cannot be added as a master.\nFree them first using the `/auction remove-slave` command.');
         }
 
         if (auction.masters.has(userId)) {
@@ -137,7 +137,7 @@ export class AuctionStore {
         else if (auction.status === 'CLOSED') throw new Error('This auction is already over.');
 
         if (!auction.slaves.has(userId)) {
-            throw new Error(`**${userTag}** is already not a slave.`);
+            throw new Error(`**${userTag}** is already freed.`);
         }
 
         auction.slaves.delete(userId);

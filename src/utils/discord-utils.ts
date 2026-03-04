@@ -15,12 +15,20 @@ export function getRelativeDiscordTimestamp(forTimestamp: milliseconds): string 
  * @param message - The error message to display.
  * @returns An InteractionReplyOptions object with the error embed and ephemeral flag.
  */
-export function errorReplyBuilder(message: string, ephemeral = true, title?: string): InteractionReplyOptions {
+export function errorReplyBuilder({ message, ephemeral = true, title, author }: {
+    author?: EmbedAuthor,
+    title?: string,
+    message: string,
+    ephemeral?: boolean,
+}): InteractionReplyOptions {
     const embed = new EmbedBuilder()
         .setColor(0xef4444) // tailwind red-500
         .setDescription(message);
     if (title) {
         embed.setTitle(title);
+    }
+    if (author) {
+        embed.setAuthor(author);
     }
 
     return {
@@ -30,12 +38,25 @@ export function errorReplyBuilder(message: string, ephemeral = true, title?: str
 }
 
 
-export function infoReplyBuilder(message: string, ephemeral?: boolean, title?: string): InteractionReplyOptions {
+type EmbedAuthor = {
+    name: string;
+    iconURL?: string;
+};
+
+export function infoReplyBuilder({ message, ephemeral = false, title, author }: {
+    author?: EmbedAuthor,
+    title?: string,
+    message: string,
+    ephemeral?: boolean,
+}): InteractionReplyOptions {
     const embed = new EmbedBuilder()
         .setColor(0x60a5fa) // tailwind blue-500
         .setDescription(message);
     if (title) {
         embed.setTitle(title);
+    }
+    if (author) {
+        embed.setAuthor(author);
     }
 
     return {

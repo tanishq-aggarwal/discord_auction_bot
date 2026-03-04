@@ -8,12 +8,16 @@ export async function removeMaster(interaction: ChatInputCommandInteraction) {
 
     try {
         const auction = auctions.removeMaster(interaction.guildId!, auctionName, master.id, master.tag);
-        console.log(`[auction:remove-master] guild=${interaction.guildId!} auction=${auctionName} master=${master.tag} (${master.id})`);
-        await interaction.reply(infoReplyBuilder(
-            `Removed **${master.tag}** from **${auction.name}** bidder pool.`,
-        ));
+        console.log(`[auction:remove-master] guild=${interaction.guildId!} auction=${auctionName} master=${master.tag}`);
+        await interaction.reply(infoReplyBuilder({
+            author: {
+                name: master.tag,
+                iconURL: master.displayAvatarURL(),
+            },
+            message: `has been removed as a master from **${auction.name}** auction.`,
+        }));
     } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Failed to remove master.';
-        await interaction.reply(errorReplyBuilder(msg));
+        const message = err instanceof Error ? err.message : 'Failed to remove master. Please try again.';
+        await interaction.reply(errorReplyBuilder({message}));
     }
 }

@@ -10,12 +10,16 @@ export async function addSlave(interaction: ChatInputCommandInteraction) {
     try {
         const auction = auctions.addSlave(interaction.guildId!, auctionName, player.id, player.tag);
 
-        console.log(`[auction:add-slave] guild=${interaction.guildId!} auction=${auctionName} player=${player.tag} (${player.id})`);
-        await interaction.reply(infoReplyBuilder(
-            `Added **${player.tag}** to **${auction.name}** slave pool.`,
-        ));
+        console.log(`[auction:add-slave] guild=${interaction.guildId!} auction=${auctionName} player=${player.tag}`);
+        await interaction.reply(infoReplyBuilder({
+            author: {
+                name: player.tag,
+                iconURL: player.displayAvatarURL(),
+            },
+            message: `has been successfully enslaved for **${auction.name}** auction.`,
+        }));
     } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Failed to add slave.';
-        await interaction.reply(errorReplyBuilder(msg));
+        const message = err instanceof Error ? err.message : 'Failed to add slave. Please try again.';
+        await interaction.reply(errorReplyBuilder({message}));
     }
 }
