@@ -3,12 +3,19 @@ import { REST, Routes, SlashCommandBuilder } from 'discord.js';
 
 const token = process.env.DISCORD_TOKEN!;
 const clientId = process.env.CLIENT_ID!;
-const guildId = process.env.GUILD_ID!;
 
 const commands = [
   new SlashCommandBuilder()
   .setName('auction')
   .setDescription('Auction commands')
+  .addSubcommand(sub =>
+    sub
+      .setName('set-admin-role')
+      .setDescription('Configure which role can manage auctions in this server')
+      .addRoleOption(opt =>
+        opt.setName('role').setDescription('Pick an existing role from this server').setRequired(true),
+      ),
+  )
   .addSubcommand(sub =>
     sub
       .setName('create')
@@ -19,19 +26,19 @@ const commands = [
   )
   .addSubcommand(sub =>
     sub
-      .setName('add-player')
-      .setDescription('Add a server member to the auction player pool')
+      .setName('add-slave')
+      .setDescription('Add a player to the slave pool')
       .addStringOption(opt =>
         opt.setName('auction_name').setDescription('Auction name').setRequired(true).setAutocomplete(true),
       )
       .addUserOption(opt =>
-        opt.setName('player').setDescription('Pick the player (server member)').setRequired(true),
+        opt.setName('player').setDescription('Select a user to enslave').setRequired(true),
       ),
   )
   .addSubcommand(sub =>
     sub
-      .setName('add-participant')
-      .setDescription('Add a participant to an auction')
+      .setName('add-master')
+      .setDescription('Add a player to the bidder pool')
       .addStringOption(opt =>
         opt
           .setName('auction_name')
@@ -41,39 +48,43 @@ const commands = [
       )
       .addUserOption(opt =>
         opt
-          .setName('participant')
-          .setDescription('Pick the participant (server member)')
+          .setName('player')
+          .setDescription('Select a user')
           .setRequired(true),
       ),
   )
   .addSubcommand(sub =>
     sub
-      .setName('set-admin-role')
-      .setDescription('Set which role can manage auctions in this server')
-      .addRoleOption(opt =>
-        opt.setName('role').setDescription('Admin role for auction commands').setRequired(true),
-      ),
-  )
-  .addSubcommand(sub =>
-    sub
-      .setName('remove-player')
-      .setDescription('Remove a player from the auction player pool')
+      .setName('remove-slave')
+      .setDescription('Remove a player from the slave pool')
       .addStringOption(opt =>
         opt.setName('auction_name').setDescription('Auction name').setRequired(true).setAutocomplete(true),
       )
       .addUserOption(opt =>
-        opt.setName('player').setDescription('Player to remove').setRequired(true),
+        opt.setName('slave').setDescription('Free a slave').setRequired(true),
       ),
   )
   .addSubcommand(sub =>
     sub
-      .setName('remove-participant')
-      .setDescription('Remove a participant from the auction')
+      .setName('remove-master')
+      .setDescription('Remove a player from the bidder pool')
       .addStringOption(opt =>
         opt.setName('auction_name').setDescription('Auction name').setRequired(true).setAutocomplete(true),
       )
       .addUserOption(opt =>
-        opt.setName('participant').setDescription('Participant to remove').setRequired(true),
+        opt.setName('master').setDescription('Pick a master').setRequired(true),
+      ),
+  )
+  .addSubcommand(sub =>
+    sub
+      .setName('start')
+      .setDescription('Start the auction')
+      .addStringOption(opt =>
+        opt
+          .setName('auction_name')
+          .setDescription('Auction name')
+          .setRequired(true)
+          .setAutocomplete(true),
       ),
   )
   .toJSON()
@@ -82,6 +93,24 @@ const commands = [
 const rest = new REST({ version: '10' }).setToken(token);
 
 (async () => {
-  await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body: commands });
-  console.log('Registered /auction commands in the test guild.');
+  const guilds = (await rest.get(Routes.userGuilds())) as Array<{ id: string; name: string }>;
+
+  if (guilds.length === 0) {
+    console.log('Bot is not in any guilds. No commands were registered.');
+    return;
+  }
+
+  let successCount = 0;
+
+  for (const guild of guilds) {
+    try {
+      await rest.put(Routes.applicationGuildCommands(clientId, guild.id), { body: commands });
+      successCount += 1;
+      console.log(`Registered /auction commands in "${guild.name}" (${guild.id}).`);
+    } catch (error) {
+      console.error(`Failed to register commands in "${guild.name}" (${guild.id}).`, error);
+    }
+  }
+
+  console.log(`Finished command deployment. Registered in ${successCount}/${guilds.length} guild(s).`);
 })();
