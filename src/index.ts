@@ -23,6 +23,7 @@ import { addMaster } from './commands/add-master.js';
 import { removeMaster } from './commands/remove-master.js';
 import { removeSlave } from './commands/remove-slave.js';
 import { updateSlaveSpecialties } from './commands/update-slave-specialties.js';
+import { setAuctionChannel } from './commands/set-auction-channel.js';
 
 
 const ROUND_MS = 2 * 60 * 1000;
@@ -575,6 +576,10 @@ async function handleChatInputInteraction(interaction: ChatInputCommandInteracti
 
     else if (subcommand === 'remove-master') {
         await removeMaster(interaction);
+    }
+
+    else if (subcommand === 'set-auction-channel') {
+        await setAuctionChannel(interaction);
     }
 
     else if (subcommand === 'start') {

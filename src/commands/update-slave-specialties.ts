@@ -16,7 +16,7 @@ export async function updateSlaveSpecialties(interaction: ChatInputCommandIntera
             //     name: slave.tag,
             //     iconURL: slave.displayAvatarURL(),
             // },
-            title: `@${slave.tag}`,
+            title: `${slave.tag}`,
             thumbnailURL: slave.displayAvatarURL(),
             description: `**Specialties:** ${specialties}`,
         }));

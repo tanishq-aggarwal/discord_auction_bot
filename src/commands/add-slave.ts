@@ -17,7 +17,7 @@ export async function addSlave(interaction: ChatInputCommandInteraction) {
             //     name: player.tag,
             //     iconURL: player.displayAvatarURL(),
             // },
-            title: `@${player.tag}`,
+            title: `${player.tag}`,
             thumbnailURL: player.displayAvatarURL(),
             description: `**Specialties:** ${specialties ?? 'None'}\n\nhas been successfully enslaved for **${auction.name}** auction.`,
         }));

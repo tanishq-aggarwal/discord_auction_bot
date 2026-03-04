@@ -184,4 +184,11 @@ export class AuctionStore {
         }
         if (!foundSlave) throw new Error(`**${userTag}** has not been enslaved in any auctions.`);
     }
+
+    setAuctionChannel(guildId: string, auctionName: string, channelId: string) {
+        const auction = this.getByName(guildId, auctionName);
+        if (!auction) throw new Error(`Auction **${auctionName}** not found.`);
+        auction.channelId = channelId;
+        return auction;
+    }
 }
