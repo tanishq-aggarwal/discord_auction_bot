@@ -59,31 +59,33 @@ export async function startAuction(interaction: ChatInputCommandInteraction) {
         priorityType: priorityType as 'fixed' | 'rotating',
         startingPriorityOrder,
     };
+    auction.state = {
+        startedAt: Date.now(),
+        balances: new Map(Array.from(auction.masters.entries()).map(([id, master]) => [id, auction.rules?.startingBudget ?? 100])),
+        purchases: new Map(Array.from(auction.masters.entries()).map(([id, master]) => [id, []])),
+    };
 
-    
 
-    console.log(`[auction:start] ${auction.name} rules=${JSON.stringify(auction.rules)}`);
+    console.log(`[auction:start] auction=${auction.name} rules=${JSON.stringify(auction.rules)}`);
 
     await interaction.reply(replyBuilder({
         description: `Auction **${auction.name}** will begin shortly! Meanwhile...`
     }));
 
     await sleep(3000);
-
     await interaction.followUp(replyBuilder({
         title: 'Rules of the auction',
-        description: `- Each master will start with **${auction.rules?.startingBudget}:coin:**`
+        description: `- Each master will start with **${auction.rules?.startingBudget}🪙**`
             + `\n- Each master can acquire a maximum of **${auction.rules?.maxSlavesPerMaster}** slaves.`
             + `\n- Each round will begin with one of the masters (in rotating order) declaring which slave they want to see being bid on next.`
-            + `\n- Each round can last a maximum of **${Math.round(auction.rules?.roundDurationMs / 1000 / 60)}** minutes. If a master has not placed their bid within this time, a bid of **1:coin:** will be placed for them automatically.`
-            + `\n- Masters must hold **at least** 1:coin: for each slave they're yet to acquire for their plantation.`
-            + `\n- ${priorityType === 'fixed' ? 'Ties will be resolved based on the master rankings. Higher-ranked masters will be given preference over lower-ranked masters.' : 'Priority order for resolving ties will keep rotating each round.'}`
+            + `\n- Each round can last a maximum of **${Math.round(auction.rules?.roundDurationMs / 1000 / 60)}** minutes. If a master has not placed their bid within this time, a bid of **1🪙** will be placed for them automatically.`
+            + `\n- Masters must hold **at least** 1🪙 for each slave they're yet to acquire for their plantation.`
+            + `\n- ${priorityType === 'fixed' ? 'Ties will be resolved based on the masters\' rankings. Higher-ranked masters will be given preference over lower-ranked masters.' : 'Priority order for resolving ties will keep rotating each round.'}`
             + `\n- The auction will end once all the slaves have been sold.`,
         color: 'violet-500'
     }));
 
     await sleep(5000);
-
     await interaction.followUp(replyBuilder({
         title: 'Meet the masters',
         description: `The following masters will be bidding in this auction${priorityType === 'fixed' ? ' (in ranked order)' : ''}:\n`
@@ -95,7 +97,6 @@ export async function startAuction(interaction: ChatInputCommandInteraction) {
     }));
 
     await sleep(5000);
-
     await interaction.followUp(replyBuilder({
         title: 'Meet the slaves',
         description: 'The following slaves will be up for grabs in this auction:\n' + Array.from(auction.slaves.values()).map((slave, index) => {
@@ -104,8 +105,4 @@ export async function startAuction(interaction: ChatInputCommandInteraction) {
         }).join('\n'),
         color: 'violet-500'
     }));
-
-    // TODO: Kick off first round
-    // await startNextRound(auction);
-    return;
 }

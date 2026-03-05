@@ -134,6 +134,24 @@ const commands = [
           .setAutocomplete(true),
       ),
   )
+  .addSubcommand(sub =>
+    sub
+      .setName('start-next-round')
+      .setDescription('Start the next round of an auction')
+      .addStringOption(opt =>
+        opt
+          .setName('auction_name')
+          .setDescription('Auction name')
+          .setRequired(true)
+          .setAutocomplete(true)
+      )
+      .addUserOption(opt =>
+        opt
+          .setName('nominated_slave')
+          .setDescription('Pick a slave to be nominated for this round')
+          .setRequired(true)
+      )
+  )
   .toJSON()
 ];
 

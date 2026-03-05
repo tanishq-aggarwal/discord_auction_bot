@@ -1,4 +1,4 @@
-// https://discord.com/oauth2/authorize?client_id=1477614199340404839&permissions=19456&integration_type=0&scope=bot+applications.commands
+// https://discord.com/oauth2/authorize?client_id=1477614199340404839&permissions=274877991936&integration_type=0&scope=bot+applications.commands
 
 import 'dotenv/config';
 import {
@@ -25,6 +25,8 @@ import { removeSlave } from './commands/remove-slave.js';
 import { updateSlaveSpecialties } from './commands/update-slave-specialties.js';
 import { getPermutations } from './utils/common.js';
 import { startAuction } from './commands/start.js';
+import { resetAuction } from './commands/reset.js';
+import { handlePlaceBidButton, handlePlaceBidModal, startNextRound as startNextRoundCommand } from './commands/start-next-round.js';
 
 
 const ROUND_MS = 2 * 60 * 1000;
@@ -563,7 +565,9 @@ async function handleChatInputInteraction(interaction: ChatInputCommandInteracti
         subcommand === 'add-master' ||
         subcommand === 'remove-slave' ||
         subcommand === 'remove-master' ||
-        subcommand === 'start'
+        subcommand === 'start' ||
+        subcommand === 'reset' ||
+        subcommand === 'start-next-round'
     ) {
         // TODO: Uncomment this in prod
         // if (!await verifyAuctionAdmin(interaction)) return;
@@ -602,6 +606,12 @@ async function handleChatInputInteraction(interaction: ChatInputCommandInteracti
     else if (subcommand === 'start') {
         await startAuction(interaction);
     }
+    else if (subcommand === 'reset') {
+        await resetAuction(interaction);
+    }
+    else if (subcommand === 'start-next-round') {
+        await startNextRoundCommand(interaction);
+    }
 }
 
 
@@ -616,11 +626,27 @@ client.once(Events.ClientReady, (c) => {
         '1288936489534754826',
         'test',
     );
-    auctions.addSlave('1288936489534754826', 'test', '284509170412027905', 'deathstar6678', '3x elo king, elite attacker');
-    auctions.addSlave('1288936489534754826', 'test', '1384661102251737169', 'godman_69', 'hosting/managing, well-respected figure in cc community');
-    auctions.addSlave('1288936489534754826', 'test', '1279092301825704038', 'jpk11.1', 'elite base builder, cc professional, hosting/managing');
-    auctions.addSlave('1288936489534754826', 'test', '678342626646163506', 'xanderheij', 'elite attacker, leader of #2 global cc clan');
+    // auctions.addSlave('1288936489534754826', 'test', '284509170412027905', 'deathstar6678', '3x elo king, elite attacker');
+    // auctions.addSlave('1288936489534754826', 'test', '1384661102251737169', 'godman_69', 'hosting/managing, well-respected figure in cc community');
+    auctions.addSlave('1288936489534754826', 'test', '1279092301825704038', 'jpk11.1', 'base builder');
+    // auctions.addSlave('1288936489534754826', 'test', '678342626646163506', 'xanderheij', 'elite attacker, leader of #2 global cc clan');
     auctions.addMaster('1288936489534754826', 'test', '235648483003072512', 'spyke_x');
+
+
+    auction.channelId = '1478447176605503626';
+    auction.status = 'LIVE';
+    auction.rules = {
+        startingBudget: 100,
+        roundDurationMs: 2 * 60 * 1000,
+        maxSlavesPerMaster: Math.ceil(auction.slaves.size / auction.masters.size),
+        priorityType: 'fixed',
+        startingPriorityOrder: ['235648483003072512'],
+    };
+    auction.state = {
+        startedAt: Date.now(),
+        balances: new Map(Array.from(auction.masters.entries()).map(([id, master]) => [id, auction.rules?.startingBudget ?? 100])),
+        purchases: new Map(Array.from(auction.masters.entries()).map(([id, master]) => [id, []])),
+    };
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
@@ -630,6 +656,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     else if (interaction.isChatInputCommand()) {
         await handleChatInputInteraction(interaction);
+    }
+    else if (interaction.isButton()) {
+        await handlePlaceBidButton(interaction);
+    }
+    else if (interaction.isModalSubmit()) {
+        await handlePlaceBidModal(interaction);
     }
 });
 

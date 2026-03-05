@@ -16,8 +16,8 @@ export async function resetAuction(interaction: ChatInputCommandInteraction) {
         return;
     }
 
-    delete auction['state'];
     delete auction['currentRoundState'];
+    delete auction['state'];
     delete auction['rules'];
     auction.channelId = null;
     auction.status = 'INIT';

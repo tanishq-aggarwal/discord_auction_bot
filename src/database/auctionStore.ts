@@ -6,11 +6,13 @@ export type AuctionStatus = 'INIT' | 'LIVE' | 'CLOSED';
 export type Bid = { amount: number; isAuto: boolean; submittedAt: epochMilliseconds };
 
 export type RoundState = {
-    nominee: Slave["id"];
-    nominatedBy: Master["id"];
+    nomineeId: Slave["id"];
+    nomineeTag?: string;
+    nomineeAvatarURL?: string;
     startedAt: epochMilliseconds;
     deadline: epochMilliseconds;
-    priorityOrder?: Master["id"][];
+    priorityOrder: Master["id"][];
+    statusMessageId?: string;
     bids: Map<Master["id"], Bid>;
     timeoutHandle?: NodeJS.Timeout;
 };
@@ -25,7 +27,7 @@ export type AuctionRules = {
 
 export type AuctionState = {
     startedAt: epochMilliseconds;
-    endedAt: epochMilliseconds;
+    endedAt?: epochMilliseconds;
     balances: Map<Master["id"], number>;
     purchases: Map<Master["id"], Slave["id"][]>;
 };
@@ -47,6 +49,7 @@ export type Auction = {
     state?: AuctionState;
     /** Gets set whenever a round is started */
     currentRoundState?: RoundState;
+    lastRoundState?: RoundState;
 };
 
 
@@ -180,7 +183,7 @@ export class AuctionStore {
         const guildMap = this.byGuildId.get(guildId);
         if (!guildMap) return [];
         return Array.from(guildMap.values())
-                    .filter(auction => auction.status === 'INIT')
+                    .filter(auction => auction.status !== 'CLOSED')
                     .map(auction => auction.name);
     }
 

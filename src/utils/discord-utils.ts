@@ -28,7 +28,7 @@ type EmbedAuthor = {
     iconURL?: string;
 };
 
-const colorsMap: Record<string, ColorResolvable> = {
+export const colorsMap = {
     'red-500': 0xef4444,
     'blue-400': 0x60a5fa,
     'green-500': 0x22c55e,
@@ -44,9 +44,9 @@ export function replyBuilder({ plaintextMessage, description, ephemeral = false,
     fields?: Record<string, string>,
     footer?: string,
     ephemeral?: boolean,
-    color?: 'red-500' | 'blue-400' | 'green-500' | 'violet-500'
+    color?: keyof typeof colorsMap
 }): InteractionReplyOptions {
-    const embed = new EmbedBuilder().setColor(colorsMap[color]!);
+    const embed = new EmbedBuilder().setColor(colorsMap[color]);
     if (description) {
         embed.setDescription(description);
     }
