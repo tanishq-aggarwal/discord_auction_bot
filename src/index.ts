@@ -22,7 +22,7 @@ import { addSlave } from './commands/add-slave.js';
 import { addMaster } from './commands/add-master.js';
 import { removeMaster } from './commands/remove-master.js';
 import { removeSlave } from './commands/remove-slave.js';
-import { updateSlaveSpecialties } from './commands/update-slave-specialties.js';
+import { updateSlaveSpecialty } from './commands/update-slave-specialty.js';
 import { getPermutations } from './utils/common.js';
 import { startAuction } from './commands/start.js';
 import { resetAuction } from './commands/reset.js';
@@ -587,8 +587,8 @@ async function handleChatInputInteraction(interaction: ChatInputCommandInteracti
         await addSlave(interaction);
     }
 
-    else if (subcommand === 'update-slave-specialties') {
-        await updateSlaveSpecialties(interaction);
+    else if (subcommand === 'update-slave-specialty') {
+        await updateSlaveSpecialty(interaction);
     }
 
     else if (subcommand === 'add-master') {

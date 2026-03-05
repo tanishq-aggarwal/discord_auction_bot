@@ -59,7 +59,7 @@ export type DiscordUser = {
 }
 export type Master = DiscordUser;
 export type Slave = DiscordUser & {
-    specialties?: string | undefined;
+    specialty: "Base Builder" | "Attacker" | "All Rounder" | "Water Boy";
 };
 
 
@@ -114,7 +114,7 @@ export class AuctionStore {
         return guildMap.get(auctionName);
     }
 
-    addSlave(guildId: string, auctionName: string, userId: string, userTag: string, specialties?: string): Auction {
+    addSlave(guildId: string, auctionName: string, userId: string, userTag: string, specialty: Slave["specialty"]): Auction {
         const auction = this.getByName(guildId, auctionName);
         if (!auction) throw new Error(`Auction **${auctionName}** not found.`);
         if (auction.status === 'LIVE') throw new Error('Cannot modify auction pool/participants after it has already started.');
@@ -128,7 +128,7 @@ export class AuctionStore {
             throw new Error('That user is already in the slave pool.');
         }
 
-        auction.slaves.set(userId, { tag: userTag, id: userId, specialties });
+        auction.slaves.set(userId, { tag: userTag, id: userId, specialty });
         return auction;
     }
 
@@ -187,14 +187,14 @@ export class AuctionStore {
                     .map(auction => auction.name);
     }
 
-    updateSlaveSpecialties(guildId: string, userId: string, userTag: string, specialties: string) {
+    updateSlaveSpecialty(guildId: string, userId: string, userTag: string, specialty: Slave["specialty"]) {
         const auctions = this.byGuildId.get(guildId);
         if (!auctions) throw new Error(`No auctions found for this server.`);
 
         let foundSlave = false;
         for (const auction of auctions.values()) {
             if (auction.slaves.has(userId)) {
-                auction.slaves.get(userId)!.specialties = specialties;
+                auction.slaves.get(userId)!.specialty = specialty;
                 foundSlave = true;
             }
         }

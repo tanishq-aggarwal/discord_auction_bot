@@ -35,22 +35,28 @@ const commands = [
         opt.setName('player').setDescription('Select a user to enslave').setRequired(true),
       )
       .addStringOption(opt =>
-        opt.setName('specialties').setDescription('Specify things this slave is good at').setRequired(false),
+        opt.setName('specialty').setDescription('Specify what this slave does best').setRequired(true).setChoices([
+          { name: 'Base Builder', value: 'Base Builder' },
+          { name: 'Attacker', value: 'Attacker' },
+          { name: 'All Rounder', value: 'All Rounder' },
+          { name: 'Water Boy', value: 'Water Boy' },
+        ]),
       ),
   )
   .addSubcommand(sub =>
     sub
-      .setName('update-slave-specialties')
-      .setDescription('Set or update the specialties of a slave')
+      .setName('update-slave-specialty')
+      .setDescription('Update the specialty of a slave')
       .addUserOption(opt =>
-        opt.setName('slave')
-          .setDescription('Select the slave')
-          .setRequired(true),
+        opt.setName('slave').setDescription('Select the slave').setRequired(true),
       )
       .addStringOption(opt =>
-        opt.setName('specialties')
-          .setDescription('Specify things this slave is good at')
-          .setRequired(true),
+        opt.setName('specialty').setDescription('Specify what this slave does best').setRequired(true).setChoices([
+          { name: 'Base Builder', value: 'Base Builder' },
+          { name: 'Attacker', value: 'Attacker' },
+          { name: 'All Rounder', value: 'All Rounder' },
+          { name: 'Water Boy', value: 'Water Boy' },
+        ]),
       ),
   )
   .addSubcommand(sub =>

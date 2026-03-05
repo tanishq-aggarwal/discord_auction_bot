@@ -97,7 +97,7 @@ function createRoundEmbed(auction: Auction) {
     return new EmbedBuilder()
         .setColor(colorsMap['green-500'])
         .setAuthor({name: `🔥 Available Now 🔥`})
-        .setTitle(`__${nominee.tag}__ — ${nominee.specialties ?? "None"}`)
+        .setTitle(`__${nominee.tag}__ — ${nominee.specialty.toLowerCase()}`)
         // .setTitle(nominee.tag)
         .setDescription(
                 // `(${nominee.specialties ?? "None"})\n\n` +
