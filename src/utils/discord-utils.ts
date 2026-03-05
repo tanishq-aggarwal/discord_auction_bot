@@ -32,7 +32,9 @@ export const colorsMap = {
     'red-500': 0xef4444,
     'blue-400': 0x60a5fa,
     'green-500': 0x22c55e,
-    'violet-500': 0x8b5cf6
+    'violet-500': 0x8b5cf6,
+    'yellow-400': 0xfacc15,
+    'pink-500': 0xec4899
 };
 
 export function replyBuilder({ plaintextMessage, description, ephemeral = false, title, author, thumbnailURL, fields, footer, color = 'blue-400' }: {

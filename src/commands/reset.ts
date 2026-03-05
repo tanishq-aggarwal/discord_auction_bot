@@ -16,6 +16,8 @@ export async function resetAuction(interaction: ChatInputCommandInteraction) {
         return;
     }
 
+    // TODO: Cancel any ongoing rounds
+
     delete auction['currentRoundState'];
     delete auction['state'];
     delete auction['rules'];
