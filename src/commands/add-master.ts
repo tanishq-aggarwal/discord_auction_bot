@@ -1,6 +1,6 @@
 import type { ChatInputCommandInteraction } from "discord.js";
 import { auctions } from "../database/global.js";
-import { errorReplyBuilder, infoReplyBuilder } from "../utils/discord-utils.js";
+import { errorReplyBuilder, replyBuilder } from "../utils/discord-utils.js";
 
 
 export async function addMaster(interaction: ChatInputCommandInteraction) {
@@ -11,7 +11,7 @@ export async function addMaster(interaction: ChatInputCommandInteraction) {
         const auction = auctions.addMaster(interaction.guildId!, auctionName, player.id, player.tag);
 
         console.log(`[auction:add-master] guild=${interaction.guildId!} auction=${auctionName} player=${player.tag}`);
-        await interaction.reply(infoReplyBuilder({
+        await interaction.reply(replyBuilder({
             author: {
                 name: player.tag,
                 iconURL: player.displayAvatarURL(),
@@ -20,6 +20,6 @@ export async function addMaster(interaction: ChatInputCommandInteraction) {
         }));
     } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to add master. Please try again.';
-        await interaction.reply(errorReplyBuilder({message}));
+        await interaction.reply(errorReplyBuilder({description: message}));
     }
 }

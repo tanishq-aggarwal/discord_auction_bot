@@ -1,6 +1,6 @@
 import type { ChatInputCommandInteraction } from "discord.js";
 import { auctions } from "../database/global.js";
-import { errorReplyBuilder, infoReplyBuilder } from "../utils/discord-utils.js";
+import { errorReplyBuilder, replyBuilder } from "../utils/discord-utils.js";
 
 
 export async function updateSlaveSpecialties(interaction: ChatInputCommandInteraction) {
@@ -11,7 +11,7 @@ export async function updateSlaveSpecialties(interaction: ChatInputCommandIntera
         auctions.updateSlaveSpecialties(interaction.guildId!, slave.id, slave.tag, specialties);
 
         console.log(`[auction:update-slave-specialties] guild=${interaction.guildId!} slave=${slave.tag} specialties=${specialties}`);
-        await interaction.reply(infoReplyBuilder({
+        await interaction.reply(replyBuilder({
             // author: {
             //     name: slave.tag,
             //     iconURL: slave.displayAvatarURL(),
@@ -22,6 +22,6 @@ export async function updateSlaveSpecialties(interaction: ChatInputCommandIntera
         }));
     } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to update slave specialties. Please try again.';
-        await interaction.reply(errorReplyBuilder({message}));
+        await interaction.reply(errorReplyBuilder({description: message}));
     }
 }

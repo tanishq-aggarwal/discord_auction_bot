@@ -1,4 +1,4 @@
-import { EmbedBuilder, MessageFlags, type InteractionReplyOptions } from "discord.js";
+import { EmbedBuilder, MessageFlags, type ColorResolvable, type InteractionReplyOptions } from "discord.js";
 import { msToS, type milliseconds } from "./common.js";
 
 /**
@@ -15,26 +15,11 @@ export function getRelativeDiscordTimestamp(forTimestamp: milliseconds): string 
  * @param message - The error message to display.
  * @returns An InteractionReplyOptions object with the error embed and ephemeral flag.
  */
-export function errorReplyBuilder({ message, ephemeral = true, title, author }: {
-    author?: EmbedAuthor,
-    title?: string,
-    message: string,
+export function errorReplyBuilder({ description, ephemeral = true }: {
+    description: string,
     ephemeral?: boolean,
 }): InteractionReplyOptions {
-    const embed = new EmbedBuilder()
-        .setColor(0xef4444) // tailwind red-500
-        .setDescription(message);
-    if (title) {
-        embed.setTitle(title);
-    }
-    if (author) {
-        embed.setAuthor(author);
-    }
-
-    return {
-        embeds: [embed],
-        flags: ephemeral ? MessageFlags.Ephemeral : undefined,
-    }
+    return replyBuilder({ description, ephemeral, color: 'red-500' });
 }
 
 
@@ -43,7 +28,14 @@ type EmbedAuthor = {
     iconURL?: string;
 };
 
-export function infoReplyBuilder({ plaintextMessage, description, ephemeral = false, title, author, thumbnailURL, fields, footer }: {
+const colorsMap: Record<string, ColorResolvable> = {
+    'red-500': 0xef4444,
+    'blue-400': 0x60a5fa,
+    'green-500': 0x22c55e,
+    'violet-500': 0x8b5cf6
+};
+
+export function replyBuilder({ plaintextMessage, description, ephemeral = false, title, author, thumbnailURL, fields, footer, color = 'blue-400' }: {
     plaintextMessage?: string,
     description?: string,
     author?: EmbedAuthor,
@@ -52,8 +44,9 @@ export function infoReplyBuilder({ plaintextMessage, description, ephemeral = fa
     fields?: Record<string, string>,
     footer?: string,
     ephemeral?: boolean,
+    color?: 'red-500' | 'blue-400' | 'green-500' | 'violet-500'
 }): InteractionReplyOptions {
-    const embed = new EmbedBuilder().setColor(0x60a5fa); // tailwind blue-500
+    const embed = new EmbedBuilder().setColor(colorsMap[color]!);
     if (description) {
         embed.setDescription(description);
     }

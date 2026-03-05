@@ -1,47 +1,60 @@
 import { randomUUID, type UUID } from 'node:crypto';
-import type { epochMilliseconds } from '../utils/common.js';
+import type { epochMilliseconds, milliseconds } from '../utils/common.js';
 
-export type AuctionStatus = 'OPEN' | 'LIVE' | 'CLOSED';
-export type Bid = { amount: number; isAuto: boolean; submittedAt: number };
+export type AuctionStatus = 'INIT' | 'LIVE' | 'CLOSED';
 
-export type LiveRound = {
-    id: string;
-    playerUserId: string;
-    startedAt: number;
-    endsAt: number;
-    bids: Map<string, Bid>;              // participantUserId -> bid
-    roundMessageId?: string;
+export type Bid = { amount: number; isAuto: boolean; submittedAt: epochMilliseconds };
+
+export type RoundState = {
+    nominee: Slave["id"];
+    nominatedBy: Master["id"];
+    startedAt: epochMilliseconds;
+    deadline: epochMilliseconds;
+    priorityOrder?: Master["id"][];
+    bids: Map<Master["id"], Bid>;
     timeoutHandle?: NodeJS.Timeout;
 };
 
-export type LiveState = {
-    startingBudget: number;             // 100
-    balances: Map<string, number>;      // participantUserId -> coins
-    purchases: Map<string, string[]>;   // participantUserId -> list of playerUserIds
-    tiePriority: string[];              // rotating list of participantUserIds
-    maxPurchasesPerParticipant: number;
-    round?: LiveRound;
+export type AuctionRules = {
+    startingBudget: number;
+    roundDurationMs: milliseconds;
+    maxSlavesPerMaster: number;
+    priorityType: 'fixed' | 'rotating';
+    startingPriorityOrder: Master["id"][];
+};
+
+export type AuctionState = {
+    startedAt: epochMilliseconds;
+    endedAt: epochMilliseconds;
+    balances: Map<Master["id"], number>;
+    purchases: Map<Master["id"], Slave["id"][]>;
 };
 
 export type Auction = {
     id: UUID;
     guildId: string;
-    channelId: string;
+    channelId: string | null;
     name: string;
     status: AuctionStatus;
     createdAt: epochMilliseconds;
 
-    slaves: Map<DiscordUser["id"], Slave>;
-    masters: Map<DiscordUser["id"], DiscordUser>;
+    slaves: Map<Slave["id"], Slave>;
+    masters: Map<Master["id"], Master>;
 
-    live?: LiveState;
+    /** Gets set when auction is started */
+    rules?: AuctionRules;
+    /** Gets set when auction is started */
+    state?: AuctionState;
+    /** Gets set whenever a round is started */
+    currentRoundState?: RoundState;
 };
+
 
 export type DiscordUser = {
     tag: string;
     id: string;
 }
-
+export type Master = DiscordUser;
 export type Slave = DiscordUser & {
     specialties?: string | undefined;
 };
@@ -58,7 +71,7 @@ export class AuctionStore {
      */
     private byGuildId: Map<Auction["guildId"], Map<Auction["name"], Auction>> = new Map();
 
-    create(guildId: string, auctionName: string, auctionChannelId: string): Auction {
+    create(guildId: string, auctionName: string): Auction {
         let guildMap = this.byGuildId.get(guildId);
         if (!guildMap) {
             guildMap = new Map<string, Auction>();
@@ -73,9 +86,9 @@ export class AuctionStore {
             id: randomUUID(),
             name: auctionName,
             guildId,
-            channelId: auctionChannelId,
+            channelId: null,
             createdAt: Date.now(),
-            status: 'OPEN',
+            status: 'INIT',
             slaves: new Map(),
             masters: new Map(),
         };
@@ -167,7 +180,7 @@ export class AuctionStore {
         const guildMap = this.byGuildId.get(guildId);
         if (!guildMap) return [];
         return Array.from(guildMap.values())
-                    .filter(auction => auction.status === 'OPEN')
+                    .filter(auction => auction.status === 'INIT')
                     .map(auction => auction.name);
     }
 
@@ -183,12 +196,5 @@ export class AuctionStore {
             }
         }
         if (!foundSlave) throw new Error(`**${userTag}** has not been enslaved in any auctions.`);
-    }
-
-    setAuctionChannel(guildId: string, auctionName: string, channelId: string) {
-        const auction = this.getByName(guildId, auctionName);
-        if (!auction) throw new Error(`Auction **${auctionName}** not found.`);
-        auction.channelId = channelId;
-        return auction;
     }
 }

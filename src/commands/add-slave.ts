@@ -1,6 +1,6 @@
 import type { ChatInputCommandInteraction } from "discord.js";
 import { auctions } from "../database/global.js";
-import { errorReplyBuilder, infoReplyBuilder } from "../utils/discord-utils.js";
+import { errorReplyBuilder, replyBuilder } from "../utils/discord-utils.js";
 
 export async function addSlave(interaction: ChatInputCommandInteraction) {
     
@@ -12,7 +12,7 @@ export async function addSlave(interaction: ChatInputCommandInteraction) {
         const auction = auctions.addSlave(interaction.guildId!, auctionName, player.id, player.tag, specialties ?? undefined);
 
         console.log(`[auction:add-slave] guild=${interaction.guildId!} auction=${auctionName} player=${player.tag}`);
-        await interaction.reply(infoReplyBuilder({
+        await interaction.reply(replyBuilder({
             // author: {
             //     name: player.tag,
             //     iconURL: player.displayAvatarURL(),
@@ -23,6 +23,6 @@ export async function addSlave(interaction: ChatInputCommandInteraction) {
         }));
     } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to add slave. Please try again.';
-        await interaction.reply(errorReplyBuilder({message}));
+        await interaction.reply(errorReplyBuilder({description: message}));
     }
 }

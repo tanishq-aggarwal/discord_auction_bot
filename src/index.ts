@@ -13,7 +13,7 @@ import {
     AutocompleteInteraction,
 } from 'discord.js';
 import { randomUUID } from 'node:crypto';
-import { errorReplyBuilder, getRelativeDiscordTimestamp, infoReplyBuilder } from './utils/discord-utils.js';
+import { errorReplyBuilder, getRelativeDiscordTimestamp, replyBuilder } from './utils/discord-utils.js';
 import { isServerAdmin, verifyAuctionAdmin } from './utils/auth.js';
 import { setAdminRole } from './commands/set-admin-role.js';
 import { auctions } from './database/global.js';
@@ -23,7 +23,8 @@ import { addMaster } from './commands/add-master.js';
 import { removeMaster } from './commands/remove-master.js';
 import { removeSlave } from './commands/remove-slave.js';
 import { updateSlaveSpecialties } from './commands/update-slave-specialties.js';
-import { setAuctionChannel } from './commands/set-auction-channel.js';
+import { getPermutations } from './utils/common.js';
+import { startAuction } from './commands/start.js';
 
 
 const ROUND_MS = 2 * 60 * 1000;
@@ -274,33 +275,7 @@ async function postToAuctionChannel(auction: any, content: string, components: a
   return channel.send({ content, components });
 }
 
-
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
-
-client.once(Events.ClientReady, (c) => {
-    console.log(`${c.user.tag} is online!`);
-});
-
 // client.on(Events.InteractionCreate, async (interaction) => {
-//     if (interaction.isAutocomplete()) {
-//         if (!interaction.guildId) return;
-
-//         if (interaction.commandName !== 'auction') return;
-
-//         const focused = interaction.options.getFocused(true);
-//         if (focused.name !== 'auction_name') return;
-
-//         const typed = String(focused.value ?? '').toLowerCase();
-
-//         const names = auctions
-//         .listOpenAuctionNames(interaction.guildId)
-//         .filter(n => n.toLowerCase().includes(typed))
-//         .slice(0, 25);
-
-//         await interaction.respond(names.map(n => ({ name: n, value: n })));
-//         return;
-//     }
-
 //     if (interaction.isButton()) {
 //         if (!interaction.inGuild() || !interaction.guildId) return;
 
@@ -508,6 +483,52 @@ async function handleAutocompleteInteraction(interaction: AutocompleteInteractio
 
         await interaction.respond(names.map(n => ({ name: n, value: n })));
     }
+
+    else if (focused.name === 'priority_order') {
+        // Suggest possible combinations (permutations) of masters' discord tags for the entered auction_name
+        const auctionName = interaction.options.getString('auction_name', false);
+        if (!auctionName) {
+            // Don't suggest anything if auction_name isn't typed yet
+            await interaction.respond([]);
+            return;
+        }
+
+        const auction = auctions.getByName(interaction.guildId, auctionName);
+        if (!auction || !auction.masters.size) {
+            await interaction.respond([]);
+            return;
+        }
+
+        // Get all master usernames
+        const masterTags = Array.from(auction.masters.values()).map(m => m.tag);
+
+        const permutations = getPermutations(masterTags);
+        const orderedStrings = permutations.map(tags => tags.join(', '));
+
+        // Filter out permutations that don't start with what the user has typed so far (case-insensitive and forgiving extra spaces)
+        // Normalize both user input and permutation to ignore extra spaces around commas/names
+        function normalize(s: string): string {
+            return s
+                .split(',')
+                .map(part => part.trim().toLowerCase())
+                .join(', ');
+        }
+
+        const normalizedTyped = normalize(typed);
+
+        const filteredOrderedStrings = orderedStrings.filter(s => {
+            // Check if user has typed anything; if not, offer all
+            if (!normalizedTyped) return true;
+            const normalizedString = normalize(s);
+            return normalizedString.startsWith(normalizedTyped);
+        });
+
+        // Only send a reasonable number of autocomplete options
+        await interaction.respond(
+            filteredOrderedStrings.slice(0, 25).map(s => ({ name: s, value: s }))
+        );
+        return;
+      }
 }
 
 
@@ -515,11 +536,11 @@ async function handleAutocompleteInteraction(interaction: AutocompleteInteractio
 async function handleChatInputInteraction(interaction: ChatInputCommandInteraction) {
     if (interaction.commandName !== 'auction') return;
     if (!interaction.inGuild() || !interaction.guildId) {
-        await interaction.reply(errorReplyBuilder({message: 'This command can only be used inside a server.'}));
+        await interaction.reply(errorReplyBuilder({description: 'This command can only be used inside a server.'}));
         return;
     }
     if (!interaction.channelId) {
-        await interaction.reply(errorReplyBuilder({message: 'This command can only be used inside a server channel.'}));
+        await interaction.reply(errorReplyBuilder({description: 'This command can only be used inside a server channel.'}));
         return;
     }
 
@@ -578,55 +599,29 @@ async function handleChatInputInteraction(interaction: ChatInputCommandInteracti
         await removeMaster(interaction);
     }
 
-    else if (subcommand === 'set-auction-channel') {
-        await setAuctionChannel(interaction);
-    }
-
     else if (subcommand === 'start') {
-        const auctionName = interaction.options.getString('auction_name', true);
-        const auction = auctions.getByName(interaction.guildId, auctionName);
-        if (!auction) {
-            await interaction.reply({ content: `Auction "${auctionName}" not found.`, flags: MessageFlags.Ephemeral });
-            return;
-        }
-        if (auction.status !== 'OPEN') {
-            await interaction.reply({ content: `Auction "${auctionName}" is not OPEN.`, flags: MessageFlags.Ephemeral });
-            return;
-        }
-        if (auction.masters.size < 2) {
-            await interaction.reply({ content: 'Add at least 2 participants first.', flags: MessageFlags.Ephemeral });
-            return;
-        }
-        if (auction.slaves.size < 1) {
-            await interaction.reply({ content: 'Add at least 1 player first.', flags: MessageFlags.Ephemeral });
-            return;
-        }
-
-        auction.status = 'LIVE';
-
-        const participantsCount = auction.masters.size;
-        const playersCount = auction.slaves.size;
-
-        const maxPurchasesPerParticipant = Math.ceil(playersCount / participantsCount);
-        const participantIds = [...auction.masters.keys()]; // insertion order = initial priority
-
-        auction.live = {
-            startingBudget: 100,
-            maxPurchasesPerParticipant,
-            balances: new Map(participantIds.map(id => [id, 100] as const)),
-            purchases: new Map(participantIds.map(id => [id, []] as const)),
-            tiePriority: [...participantIds],
-        };
-
-        console.log(`[auction:start] ${auction.name} participants=${auction.masters.size} players=${auction.slaves.size}`);
-
-        await interaction.reply(`Started auction **${auction.name}**. Beginning round 1...`);
-
-        // Kick off first round
-        await startNextRound(auction);
-        return;
+        await startAuction(interaction);
     }
 }
+
+
+
+const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+
+client.once(Events.ClientReady, (c) => {
+    console.log(`${c.user.tag} is online!`);
+
+    // Testing setup
+    const auction = auctions.create(
+        '1288936489534754826',
+        'test',
+    );
+    auctions.addSlave('1288936489534754826', 'test', '284509170412027905', 'deathstar6678', '3x elo king, elite attacker');
+    auctions.addSlave('1288936489534754826', 'test', '1384661102251737169', 'godman_69', 'hosting/managing, well-respected figure in cc community');
+    auctions.addSlave('1288936489534754826', 'test', '1279092301825704038', 'jpk11.1', 'elite base builder, cc professional, hosting/managing');
+    auctions.addSlave('1288936489534754826', 'test', '678342626646163506', 'xanderheij', 'elite attacker, leader of #2 global cc clan');
+    auctions.addMaster('1288936489534754826', 'test', '235648483003072512', 'spyke_x');
+});
 
 client.on(Events.InteractionCreate, async (interaction) => {
     if (interaction.isAutocomplete()) {

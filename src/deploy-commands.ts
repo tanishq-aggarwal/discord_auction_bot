@@ -95,24 +95,6 @@ const commands = [
   )
   .addSubcommand(sub =>
     sub
-      .setName('set-auction-channel')
-      .setDescription('Set the channel in which the auction should be held')
-      .addStringOption(opt =>
-        opt
-          .setName('auction_name')
-          .setDescription('Auction name')
-          .setRequired(true)
-          .setAutocomplete(true),
-      )
-      .addChannelOption(opt =>
-        opt
-          .setName('channel')
-          .setDescription('Select the channel for this auction')
-          .setRequired(true),
-      ),
-  )
-  .addSubcommand(sub =>
-    sub
       .setName('start')
       .setDescription('Start the auction')
       .addStringOption(opt =>
@@ -122,14 +104,35 @@ const commands = [
           .setRequired(true)
           .setAutocomplete(true)
       )
-      .addIntegerOption(opt => 
+      .addStringOption(opt =>
         opt
-          .setName('round_duration')
-          .setDescription('Duration of each round in minutes')
+          .setName('priority_order')
+          .setDescription("A comma-separated list of Discord user IDs, representing the priority order for breaking ties")
           .setRequired(true)
-          .setMinValue(1)
-          .setMaxValue(5)
+          .setAutocomplete(true)
       )
+      .addStringOption(opt =>
+        opt
+          .setName('priority_type')
+          .setDescription('Type of priority order')
+          .setRequired(false)
+          .setChoices([
+            { name: 'Fixed (default)', value: 'fixed' },
+            { name: 'Rotating', value: 'rotating' },
+          ])
+      )
+  )
+  .addSubcommand(sub =>
+    sub
+      .setName('reset')
+      .setDescription('Reset an auction to its initial state (all purchases will be reverted)')
+      .addStringOption(opt =>
+        opt
+          .setName('auction_name')
+          .setDescription('Auction name')
+          .setRequired(true)
+          .setAutocomplete(true),
+      ),
   )
   .toJSON()
 ];
