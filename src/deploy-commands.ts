@@ -158,6 +158,18 @@ const commands = [
           .setRequired(true)
       )
   )
+  .addSubcommand(sub =>
+    sub
+      .setName('cancel-current-round')
+      .setDescription('Interrupt the currently active round')
+      .addStringOption(opt =>
+        opt
+          .setName('auction_name')
+          .setDescription('Auction name')
+          .setRequired(true)
+          .setAutocomplete(true)
+      )
+  )
   .toJSON()
 ];
 

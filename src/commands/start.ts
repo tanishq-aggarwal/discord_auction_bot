@@ -3,6 +3,21 @@ import { auctions } from "../database/global.js";
 import { errorReplyBuilder, replyBuilder } from "../utils/discord-utils.js";
 import { minsToMs, sleep } from "../utils/common.js";
 
+function resolveMasterIdFromPriorityToken(auction: NonNullable<ReturnType<typeof auctions.getByName>>, rawToken: string): string | null {
+    const token = rawToken.trim();
+    if (!token) return null;
+
+    const mentionMatch = token.match(/^<@!?(\d+)>$/);
+    const normalizedId = mentionMatch?.[1] ?? token;
+    if (auction.masters.has(normalizedId)) {
+        return normalizedId;
+    }
+
+    const normalizedTag = token.toLowerCase();
+    const matchingMaster = Array.from(auction.masters.values()).find(master => master.tag.toLowerCase() === normalizedTag);
+    return matchingMaster?.id ?? null;
+}
+
 
 
 export async function startAuction(interaction: ChatInputCommandInteraction) {
@@ -36,17 +51,32 @@ export async function startAuction(interaction: ChatInputCommandInteraction) {
         return;
     }
     
-    const startingPriorityOrder = priorityOrder.split(',').map(id => id.trim());
-    if (startingPriorityOrder.length !== auction.masters.size) {
+    const priorityTokens = priorityOrder
+        .split(',')
+        .map(token => token.trim())
+        .filter(Boolean);
+
+    if (priorityTokens.length !== auction.masters.size) {
         await interaction.reply(errorReplyBuilder({ description: 'Number of masters in priority order must match the number of masters added to the auction.' }));
         return;
     }
-    // Check if all IDs are valid
-    for (const id of startingPriorityOrder) {
-        if (!Array.from(auction.masters.values()).some(master => master.tag === id)) {
-            await interaction.reply(errorReplyBuilder({ description: `Master "${id}" is not a part of **${auction.name}** auction.` }));
+
+    const startingPriorityOrder: string[] = [];
+    const seenMasterIds = new Set<string>();
+    for (const token of priorityTokens) {
+        const masterId = resolveMasterIdFromPriorityToken(auction, token);
+        if (!masterId) {
+            await interaction.reply(errorReplyBuilder({ description: `Master "${token}" is not a part of **${auction.name}** auction.` }));
             return;
         }
+
+        if (seenMasterIds.has(masterId)) {
+            await interaction.reply(errorReplyBuilder({ description: `Master "${token}" appears more than once in priority order.` }));
+            return;
+        }
+
+        seenMasterIds.add(masterId);
+        startingPriorityOrder.push(masterId);
     }
     
     // Auction channel will be where the /start command was invoked
@@ -89,8 +119,7 @@ export async function startAuction(interaction: ChatInputCommandInteraction) {
     await interaction.followUp(replyBuilder({
         title: 'Meet the masters',
         description: `The following masters will be bidding in this auction${priorityType === 'fixed' ? ' (in ranked order)' : ''}:\n`
-            + startingPriorityOrder.map((masterTag, index) => {
-                const masterId = Array.from(auction.masters.values()).find(master => master.tag === masterTag)!.id;
+            + startingPriorityOrder.map((masterId, index) => {
                 return `${index + 1}. <@${masterId}>`;
             }).join('\n'),
         color: 'violet-500'

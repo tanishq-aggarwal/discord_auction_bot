@@ -22,9 +22,11 @@ const OPEN_BID_OVERVIEW_PREFIX = "auction:open-bid-overview";
 const PLACE_BID_PREFIX = "auction:place-bid";
 const BID_MODAL_PREFIX = "auction:submit-bid";
 const BID_REVEAL_DELAY_MS = 15_000;
+const EPHEMERAL_OVERVIEW_TTL_MS = 15 * 60 * 1000;
 
 type ActiveRoundState = NonNullable<Auction["currentRoundState"]>;
 const finalizingRounds = new WeakSet<ActiveRoundState>();
+const pendingOverviewMessages = new Map<string, { messageId: string; token: string; createdAt: number }>();
 
 function openBidOverviewButtonCustomId(auctionId: string): string {
     return `${OPEN_BID_OVERVIEW_PREFIX}:${auctionId}`;
@@ -45,6 +47,50 @@ function parseCustomId(customId: string, expectedPrefix: string): string | null 
     return auctionId || null;
 }
 
+function getOverviewMessageKey(auctionId: string, userId: string): string {
+    return `${auctionId}:${userId}`;
+}
+
+function rememberOverviewMessage(interaction: ButtonInteraction, auctionId: string): void {
+    if (!interaction.message.id) return;
+
+    const now = Date.now();
+    for (const [key, value] of pendingOverviewMessages.entries()) {
+        if (now - value.createdAt > EPHEMERAL_OVERVIEW_TTL_MS) {
+            pendingOverviewMessages.delete(key);
+        }
+    }
+
+    pendingOverviewMessages.set(getOverviewMessageKey(auctionId, interaction.user.id), {
+        messageId: interaction.message.id,
+        token: interaction.token,
+        createdAt: now,
+    });
+}
+
+function consumeOverviewMessage(auctionId: string, userId: string): { messageId: string; token: string } | null {
+    const key = getOverviewMessageKey(auctionId, userId);
+    const message = pendingOverviewMessages.get(key);
+    if (!message) return null;
+
+    pendingOverviewMessages.delete(key);
+    if (Date.now() - message.createdAt > EPHEMERAL_OVERVIEW_TTL_MS) return null;
+
+    return { messageId: message.messageId, token: message.token };
+}
+
+async function deleteOverviewMessageAfterBid(interaction: ModalSubmitInteraction, auctionId: string): Promise<void> {
+    const message = consumeOverviewMessage(auctionId, interaction.user.id);
+    if (!message) return;
+
+    try {
+        await interaction.client.rest.delete(`/webhooks/${interaction.applicationId}/${message.token}/messages/${message.messageId}`);
+    }
+    catch (error) {
+        console.warn("[auction:delete-overview-message]", error);
+    }
+}
+
 function getRemainingSlots(auction: Auction, masterId: string): number {
     const maxSlaves = auction.rules!.maxSlavesPerMaster;
     const purchasedCount = auction.state!.purchases.get(masterId)!.length;
@@ -60,6 +106,10 @@ function computeMaxBidAllowed(auction: Auction, masterId: string): number {
 
     const reserve = Math.max(0, remainingSlots - 1);
     return Math.max(0, balance - reserve);
+}
+
+function getEligibleMasterIdsForRound(auction: Auction): Master["id"][] {
+    return Array.from(auction.masters.keys()).filter(masterId => computeMaxBidAllowed(auction, masterId) >= 1);
 }
 
 function buildMasterOverviewEmbed(auction: Auction, masterId: string): EmbedBuilder {
@@ -84,7 +134,7 @@ function buildMasterOverviewEmbed(auction: Auction, masterId: string): EmbedBuil
             `**Current Balance:** ${balance}🪙\n` + 
             `**Remaining Purchases:** ${remainingSlots}/${maxSlaves}\n` 
         );
-    if (remainingSlots > 0) {
+    if (remainingSlots > 1) {
         embed.setFooter({ text: `⚠️ You must keep at least ${balance - computeMaxBidAllowed(auction, masterId)}🪙 reserved for future purchases.`});
     }
     return embed;
@@ -111,7 +161,8 @@ function rotatePriorityOrder(priorityOrder: Master["id"][]): Master["id"][] {
 }
 
 function areAllBidsReceived(auction: Auction): boolean {
-    return auction.currentRoundState!.bids.size >= auction.masters.size;
+    const eligibleMasterIds = getEligibleMasterIdsForRound(auction);
+    return eligibleMasterIds.every(masterId => auction.currentRoundState!.bids.has(masterId));
 }
 
 function isRoundStillActive(auction: Auction, round: ActiveRoundState): boolean {
@@ -119,7 +170,7 @@ function isRoundStillActive(auction: Auction, round: ActiveRoundState): boolean 
 }
 
 function autoSubmitMissingBids(auction: Auction, round: ActiveRoundState) {
-    for (const masterId of auction.masters.keys()) {
+    for (const masterId of getEligibleMasterIdsForRound(auction)) {
         if (round.bids.has(masterId)) continue;
         round.bids.set(masterId, {
             amount: 1,
@@ -129,8 +180,9 @@ function autoSubmitMissingBids(auction: Auction, round: ActiveRoundState) {
     }
 }
 
-function getRoundWinner(auction: Auction, round: ActiveRoundState): { winnerId: string; winningBid: number } {
+function getRoundWinner(auction: Auction, round: ActiveRoundState): { winnerId: string; winningBid: number } | null {
     const bids = Array.from(round.bids.entries());
+    if (!bids.length) return null;
     const highestBid = Math.max(...bids.map(([, bid]) => bid.amount));
     const tiedMasterIds = bids
         .filter(([, bid]) => bid.amount === highestBid)
@@ -161,10 +213,13 @@ function buildAllBidsReceivedEmbed(round: ActiveRoundState): EmbedBuilder {
 function buildRoundRevealEmbed(auction: Auction, round: ActiveRoundState, winnerId: string, winningBid: number): EmbedBuilder {
     const nominee = auction.slaves.get(round.nomineeId);
     const bidsList = Array.from(auction.masters.keys())
+        .filter(masterId => round.bids.has(masterId))
         .map(masterId => {
-            const bid = round.bids.get(masterId)!;
+            const bid = round.bids.get(masterId);
+            if (!bid) return null;
             return `- <@${masterId}> — **${bid.amount}**🪙${bid.isAuto ? " (auto)" : ""}`;
         })
+        .filter((line): line is string => line !== null)
         .join("\n");
 
     return new EmbedBuilder()
@@ -172,9 +227,9 @@ function buildRoundRevealEmbed(auction: Auction, round: ActiveRoundState, winner
         // .setAuthor({ name: "🔔 Bid reveal 🔔" })
         .setTitle(`🔔 Results for ${nominee?.tag ?? `<@${round.nomineeId}>`} 🔔`)
         .setDescription(
-            `\nThe bids are in for <@${round.nomineeId}>!\n` +
-            `${bidsList}\n\n` +
-            `**🔨 Going once... going twice... SOLD to <@${winnerId}> for ${winningBid}🪙!**`
+            `\nThe bids are in for <@${round.nomineeId}>!\n\n` +
+            `${bidsList}\n\n\n` +
+            `**🔨 Going once... going twice... SOLD! to <@${winnerId}> for ${winningBid}🪙**`
         )
         .setThumbnail(round.nomineeAvatarURL ?? null);
 }
@@ -220,7 +275,22 @@ async function finalizeRound({
         await sleep(BID_REVEAL_DELAY_MS);
         if (!isRoundStillActive(auction, round)) return;
 
-        const { winnerId, winningBid } = getRoundWinner(auction, round);
+        const winningResult = getRoundWinner(auction, round);
+        if (!winningResult) {
+            if (channel?.isTextBased() && "send" in channel) {
+                await channel.send({
+                    embeds: [
+                        new EmbedBuilder()
+                            .setColor(colorsMap['blue-400'])
+                            .setDescription(`No eligible bids were submitted for <@${round.nomineeId}> this round.`),
+                    ],
+                });
+            }
+            auction.lastRoundState = round;
+            delete auction.currentRoundState;
+            return;
+        }
+        const { winnerId, winningBid } = winningResult;
         const winnerBalance = auction.state!.balances.get(winnerId) ?? 0;
         auction.state!.balances.set(winnerId, Math.max(0, winnerBalance - winningBid));
         auction.state!.purchases.get(winnerId)!.push(round.nomineeId);
@@ -300,8 +370,13 @@ async function editBiddingRoundMessage(client: Client, auction: Auction) {
 
 function buildBidProgressString(auction: Auction): string {
     const bids = auction.currentRoundState!.bids;
+    const eligibleMasterIds = getEligibleMasterIdsForRound(auction);
 
-    return Array.from(auction.masters.keys())
+    if (!eligibleMasterIds.length) {
+        return "_- No eligible bidders this round_";
+    }
+
+    return eligibleMasterIds
         .map(masterId => {
             const bid = bids.get(masterId);
             return bid
@@ -316,8 +391,9 @@ function buildBidProgressString(auction: Auction): string {
 function buildBiddingRoundEmbed(auction: Auction) {
     const round = auction.currentRoundState!;
     const nominee = auction.slaves.get(round.nomineeId)!;
+    const eligibleMasterIds = getEligibleMasterIdsForRound(auction);
     const bidProgress = buildBidProgressString(auction);
-    const bidsCount = auction.currentRoundState?.bids.size ?? 0;
+    const bidsCount = eligibleMasterIds.filter(masterId => round.bids.has(masterId)).length;
 
     return new EmbedBuilder()
         .setColor(colorsMap['green-500'])
@@ -328,7 +404,8 @@ function buildBiddingRoundEmbed(auction: Auction) {
                 // `(${nominee.specialties ?? "None"})\n\n` +
                 `\n\nBidding has been opened for <@${nominee.id}>!\n` +
                 `Ends ${getRelativeDiscordTimestamp(round.deadline)}\n\n\n` +
-                `**Bidding Progress** (${bidsCount}/${auction.masters.size})\n` +
+                `**Priority Order For Resolving Ties**\n${round.priorityOrder.map(masterId => `<@${masterId}>`).join(" > ")}\n\n\n` +
+                `**Bidding Progress** (${bidsCount}/${eligibleMasterIds.length})\n` +
                 bidProgress
         )
         .setThumbnail(round.nomineeAvatarURL ?? null)
@@ -428,13 +505,19 @@ export async function handlePlaceBidButton(interaction: ButtonInteraction) {
 
     const auction = auctions.getById(auctionId);
     if (!auction || auction.guildId !== interaction.guildId || !auction.currentRoundState) {
-        await interaction.reply({ content: "This round is no longer active.", flags: MessageFlags.Ephemeral });
+        await interaction.reply(errorReplyBuilder({ description: "This round is no longer active." }));
         return true;
     }
 
     const validationError = validateBidInteraction(auction, interaction.user.id);
     if (validationError) {
-        await interaction.reply({ content: validationError, flags: MessageFlags.Ephemeral });
+        if (overviewAuctionId && getRemainingSlots(auction, interaction.user.id) <= 0) {
+            await interaction.reply(errorReplyBuilder({
+                description: `You have already bought your maximum number of slaves.`,
+            }));
+            return true;
+        }
+        await interaction.reply(errorReplyBuilder({ description: validationError }));
         return true;
     }
 
@@ -446,6 +529,8 @@ export async function handlePlaceBidButton(interaction: ButtonInteraction) {
         });
         return true;
     }
+
+    rememberOverviewMessage(interaction, auction.id);
 
     const maxBidAllowed = computeMaxBidAllowed(auction, interaction.user.id);
     const modal = new ModalBuilder()
@@ -474,13 +559,13 @@ export async function handlePlaceBidModal(interaction: ModalSubmitInteraction) {
 
     const auction = auctions.getById(auctionId);
     if (!auction || auction.guildId !== interaction.guildId || !auction.currentRoundState) {
-        await interaction.reply({ content: "This round is no longer active.", flags: MessageFlags.Ephemeral });
+        await interaction.reply(errorReplyBuilder({ description: "This round is no longer active." }));
         return true;
     }
 
     const validationError = validateBidInteraction(auction, interaction.user.id);
     if (validationError) {
-        await interaction.reply({ content: validationError, flags: MessageFlags.Ephemeral });
+        await interaction.reply(errorReplyBuilder({ description: validationError }));
         return true;
     }
 
@@ -489,10 +574,9 @@ export async function handlePlaceBidModal(interaction: ModalSubmitInteraction) {
     const bidAmount = Number(rawBid);
 
     if (!Number.isInteger(bidAmount) || bidAmount < 1 || bidAmount > maxBidAllowed) {
-        await interaction.reply({
-            content: `Invalid bid. Enter an integer between 1 and ${maxBidAllowed}.`,
-            flags: MessageFlags.Ephemeral,
-        });
+        await interaction.reply(errorReplyBuilder({
+            description: `Invalid bid. Please enter an amount between 1 and ${maxBidAllowed}.`,
+        }));
         return true;
     }
 
@@ -502,10 +586,8 @@ export async function handlePlaceBidModal(interaction: ModalSubmitInteraction) {
         submittedAt: Date.now(),
     });
 
-    // await interaction.reply({
-    //     content: `Bid submitted: **${bidAmount}** coins.`,
-    //     flags: MessageFlags.Ephemeral,
-    // });
+    await interaction.deferUpdate();
+    await deleteOverviewMessageAfterBid(interaction, auction.id);
 
     const round = auction.currentRoundState;
     if (areAllBidsReceived(auction)) {

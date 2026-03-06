@@ -27,6 +27,7 @@ import { getPermutations } from './utils/common.js';
 import { startAuction } from './commands/start.js';
 import { resetAuction } from './commands/reset.js';
 import { handlePlaceBidButton, handlePlaceBidModal, startNextRound as startNextRoundCommand } from './commands/start-next-round.js';
+import { cancelCurrentRound } from './commands/cancel-current-round.js';
 
 
 // Handle autocompletion interactions
@@ -127,7 +128,8 @@ async function handleChatInputInteraction(interaction: ChatInputCommandInteracti
         subcommand === 'remove-master' ||
         subcommand === 'start' ||
         subcommand === 'reset' ||
-        subcommand === 'start-next-round'
+        subcommand === 'start-next-round' ||
+        subcommand === 'cancel-current-round'
     ) {
         // TODO: Uncomment this in prod
         // if (!await verifyAuctionAdmin(interaction)) return;
@@ -172,6 +174,9 @@ async function handleChatInputInteraction(interaction: ChatInputCommandInteracti
     else if (subcommand === 'start-next-round') {
         await startNextRoundCommand(interaction);
     }
+    else if (subcommand === 'cancel-current-round') {
+        await cancelCurrentRound(interaction);
+    }
 }
 
 
@@ -186,11 +191,12 @@ client.once(Events.ClientReady, (c) => {
         '1288936489534754826',
         'test',
     );
-    auctions.addSlave('1288936489534754826', 'test', '284509170412027905', 'deathstar6678', 'Attacker');
-    // auctions.addSlave('1288936489534754826', 'test', '1384661102251737169', 'godman_69', 'hosting/managing, well-respected figure in cc community');
+    // auctions.addSlave('1288936489534754826', 'test', '284509170412027905', 'deathstar6678', 'Attacker');
+    // auctions.addSlave('1288936489534754826', 'test', '1384661102251737169', 'godman_69', 'Base Builder');
     auctions.addSlave('1288936489534754826', 'test', '1279092301825704038', 'jpk11.1', 'Base Builder');
-    // auctions.addSlave('1288936489534754826', 'test', '678342626646163506', 'xanderheij', 'elite attacker, leader of #2 global cc clan');
+    auctions.addSlave('1288936489534754826', 'test', '678342626646163506', 'xanderheij', 'Attacker');
     auctions.addMaster('1288936489534754826', 'test', '235648483003072512', 'spyke_x');
+    // auctions.addMaster('1288936489534754826', 'test', '1107882569799847968', 'rival_____');
 
 
     auction.channelId = '1478447176605503626';
@@ -200,7 +206,7 @@ client.once(Events.ClientReady, (c) => {
         roundDurationMs: 2 * 60 * 1000,
         maxSlavesPerMaster: Math.ceil(auction.slaves.size / auction.masters.size),
         priorityType: 'fixed',
-        startingPriorityOrder: ['235648483003072512'],
+        startingPriorityOrder: ['235648483003072512', '1107882569799847968'],
     };
     auction.state = {
         startedAt: Date.now(),
