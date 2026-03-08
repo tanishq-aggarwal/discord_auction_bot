@@ -11,6 +11,7 @@ import {
     TextInputStyle,
     ChatInputCommandInteraction,
     AutocompleteInteraction,
+    type Interaction,
 } from 'discord.js';
 import { randomUUID } from 'node:crypto';
 import { errorReplyBuilder, getRelativeDiscordTimestamp, replyBuilder } from './utils/discord-utils.js';
@@ -28,6 +29,9 @@ import { startAuction } from './commands/start.js';
 import { resetAuction } from './commands/reset.js';
 import { handlePlaceBidButton, handlePlaceBidModal, startNextRound as startNextRoundCommand } from './commands/start-next-round.js';
 import { cancelCurrentRound } from './commands/cancel-current-round.js';
+import { undoLastRound } from './commands/undo-last-round.js';
+import { viewStatus } from './commands/view-status.js';
+import { viewParticipants } from './commands/view-participants.js';
 
 
 // Handle autocompletion interactions
@@ -40,11 +44,14 @@ async function handleAutocompleteInteraction(interaction: AutocompleteInteractio
     const typed = String(focused.value ?? '').toLowerCase();
 
     if (focused.name === 'auction_name') {
-        const names = auctions
-            .listOpenAuctionNames(interaction.guildId)
+        const subcommand = interaction.options.getSubcommand();
+        const names = (subcommand === 'view-participants'
+            ? auctions.listAuctionNames(interaction.guildId)
+            : auctions.listOpenAuctionNames(interaction.guildId))
             .filter(n => n.toLowerCase().includes(typed));
 
         await interaction.respond(names.map(n => ({ name: n, value: n })));
+        return;
     }
 
     else if (focused.name === 'priority_order') {
@@ -110,30 +117,29 @@ async function handleChatInputInteraction(interaction: ChatInputCommandInteracti
     const subcommand = interaction.options.getSubcommand();
 
     // Enforce auth
-    if (subcommand === 'set-admin-role') {
-      // TODO: Uncomment this in prod
-        // if (!isServerAdmin(interaction)) {
-        //     await interaction.reply(errorReplyBuilder(
-        //         'Only server administrators can run this command.',
-        //         false
-        //     ));
-        //     return;
-        // }
-    }
-    else if (
-        subcommand === 'create' ||
-        subcommand === 'add-slave' ||
-        subcommand === 'add-master' ||
-        subcommand === 'remove-slave' ||
-        subcommand === 'remove-master' ||
-        subcommand === 'start' ||
-        subcommand === 'reset' ||
-        subcommand === 'start-next-round' ||
-        subcommand === 'cancel-current-round'
-    ) {
-        // TODO: Uncomment this in prod
-        // if (!await verifyAuctionAdmin(interaction)) return;
-    }
+    // if (subcommand === 'set-admin-role') {
+    //     if (!isServerAdmin(interaction)) {
+    //         await interaction.reply(errorReplyBuilder(
+    //             { description: 'Only server administrators can run this command.', ephemeral: false }
+    //         ));
+    //         return;
+    //     }
+    // }
+    // else if (
+    //     subcommand === 'create' ||
+    //     subcommand === 'add-slave' ||
+    //     subcommand === 'add-master' ||
+    //     subcommand === 'remove-slave' ||
+    //     subcommand === 'remove-master' ||
+    //     subcommand === 'start' ||
+    //     subcommand === 'reset' ||
+    //     subcommand === 'start-next-round' ||
+    //     subcommand === 'cancel-current-round' ||
+    //     subcommand === 'undo-last-round' ||
+    //     subcommand === 'update-slave-specialty'
+    // ) {
+    //     if (!await verifyAuctionAdmin(interaction)) return;
+    // }
 
 
     if (subcommand === 'set-admin-role') {
@@ -177,9 +183,51 @@ async function handleChatInputInteraction(interaction: ChatInputCommandInteracti
     else if (subcommand === 'cancel-current-round') {
         await cancelCurrentRound(interaction);
     }
+    else if (subcommand === 'undo-last-round') {
+        await undoLastRound(interaction);
+    }
+    else if (subcommand === 'view-status') {
+        await viewStatus(interaction);
+    }
+    else if (subcommand === 'view-participants') {
+        await viewParticipants(interaction);
+    }
 }
 
+async function replyWithUnexpectedError(interaction: Interaction): Promise<void> {
+    if (!interaction.isRepliable()) return;
+    try {
+        if (interaction.deferred || interaction.replied) {
+            await interaction.followUp(errorReplyBuilder({ description: 'Something went wrong while handling that interaction. Please try again.' }));
+            return;
+        }
+        await interaction.reply(errorReplyBuilder({ description: 'Something went wrong while handling that interaction. Please try again.' }));
+    }
+    catch (replyError) {
+        console.error('[interaction:error-reply-failed]', replyError);
+    }
+}
 
+async function handleInteractionSafely(interaction: Interaction): Promise<void> {
+    try {
+        if (interaction.isAutocomplete()) {
+            await handleAutocompleteInteraction(interaction);
+        }
+        else if (interaction.isChatInputCommand()) {
+            await handleChatInputInteraction(interaction);
+        }
+        else if (interaction.isButton()) {
+            await handlePlaceBidButton(interaction);
+        }
+        else if (interaction.isModalSubmit()) {
+            await handlePlaceBidModal(interaction);
+        }
+    }
+    catch (error) {
+        console.error('[interaction:unhandled]', error);
+        await replyWithUnexpectedError(interaction);
+    }
+}
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
@@ -191,46 +239,44 @@ client.once(Events.ClientReady, (c) => {
         '1288936489534754826',
         'test',
     );
-    // auctions.addSlave('1288936489534754826', 'test', '284509170412027905', 'deathstar6678', 'Attacker');
+    auctions.addSlave('1288936489534754826', 'test', '284509170412027905', 'deathstar6678', 'Attacker');
     // auctions.addSlave('1288936489534754826', 'test', '1384661102251737169', 'godman_69', 'Base Builder');
     auctions.addSlave('1288936489534754826', 'test', '1279092301825704038', 'jpk11.1', 'Base Builder');
-    auctions.addSlave('1288936489534754826', 'test', '678342626646163506', 'xanderheij', 'Attacker');
+    // auctions.addSlave('1288936489534754826', 'test', '678342626646163506', 'xanderheij', 'Attacker');
     auctions.addMaster('1288936489534754826', 'test', '235648483003072512', 'spyke_x');
     // auctions.addMaster('1288936489534754826', 'test', '1107882569799847968', 'rival_____');
 
 
-    auction.channelId = '1478447176605503626';
-    auction.status = 'LIVE';
-    auction.rules = {
-        startingBudget: 100,
-        roundDurationMs: 2 * 60 * 1000,
-        maxSlavesPerMaster: Math.ceil(auction.slaves.size / auction.masters.size),
-        priorityType: 'fixed',
-        startingPriorityOrder: ['235648483003072512', '1107882569799847968'],
-    };
-    auction.state = {
-        startedAt: Date.now(),
-        balances: new Map(Array.from(auction.masters.entries()).map(([id, master]) => [id, auction.rules?.startingBudget ?? 100])),
-        purchases: new Map(Array.from(auction.masters.entries()).map(([id, master]) => [id, []])),
-    };
+    // auction.channelId = '1478447176605503626';
+    // auction.status = 'LIVE';
+    // auction.rules = {
+    //     startingBudget: 100,
+    //     roundDurationMs: 2 * 60 * 1000,
+    //     maxSlavesPerMaster: Math.ceil(auction.slaves.size / auction.masters.size),
+    //     priorityType: 'fixed',
+    //     startingPriorityOrder: ['235648483003072512', '1107882569799847968'],
+    // };
+    // auction.state = {
+    //     startedAt: Date.now(),
+    //     balances: new Map(Array.from(auction.masters.entries()).map(([id, master]) => [id, auction.rules?.startingBudget ?? 100])),
+    //     purchases: new Map(Array.from(auction.masters.entries()).map(([id, master]) => [id, []])),
+    // };
 });
 
-client.on(Events.InteractionCreate, async (interaction) => {
-    if (interaction.isAutocomplete()) {
-        await handleAutocompleteInteraction(interaction);
-    }
+client.on(Events.Error, (error) => {
+    console.error('[discord:client-error]', error);
+});
 
-    else if (interaction.isChatInputCommand()) {
-        await handleChatInputInteraction(interaction);
-    }
+process.on('unhandledRejection', (reason) => {
+    console.error('[process:unhandled-rejection]', reason);
+});
 
-    else if (interaction.isButton()) {
-        await handlePlaceBidButton(interaction);
-    }
+process.on('uncaughtException', (error) => {
+    console.error('[process:uncaught-exception]', error);
+});
 
-    else if (interaction.isModalSubmit()) {
-        await handlePlaceBidModal(interaction);
-    }
+client.on(Events.InteractionCreate, (interaction) => {
+    void handleInteractionSafely(interaction);
 });
 
 client.login(process.env.DISCORD_TOKEN);

@@ -1,4 +1,4 @@
-import { MessageFlags, type ChatInputCommandInteraction } from "discord.js";
+import type { ChatInputCommandInteraction } from "discord.js";
 import { auctions } from "../database/global.js";
 import { errorReplyBuilder, replyBuilder } from "../utils/discord-utils.js";
 
@@ -32,7 +32,6 @@ export async function cancelCurrentRound(interaction: ChatInputCommandInteractio
     }
 
     const round = auction.currentRoundState;
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     if (round.timeoutHandle) {
         clearTimeout(round.timeoutHandle);
@@ -62,12 +61,6 @@ export async function cancelCurrentRound(interaction: ChatInputCommandInteractio
                         console.warn("[auction:cancel-round:edit-status-message]", error);
                     }
                 }
-
-                const cancelledRoundNotice = errorReplyBuilder({
-                    description: `Ongoing round was cancelled.`,
-                    ephemeral: false,
-                });
-                await channel.send({ embeds: cancelledRoundNotice.embeds! });
             }
         }
         catch (error) {
@@ -76,5 +69,8 @@ export async function cancelCurrentRound(interaction: ChatInputCommandInteractio
     }
 
     console.log(`[auction:cancel-round] auction=${auction.name} nominee=${round.nomineeTag ?? round.nomineeId}`);
-    await interaction.deleteReply();
+    await interaction.reply(errorReplyBuilder({
+        description: "Ongoing round has been cancelled.",
+        ephemeral: false,
+    }));
 }

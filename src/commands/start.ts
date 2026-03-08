@@ -24,6 +24,14 @@ export async function startAuction(interaction: ChatInputCommandInteraction) {
     const auctionName = interaction.options.getString('auction_name', true);
     const priorityOrder = interaction.options.getString('priority_order', true);
     const priorityType = interaction.options.getString('priority_type', false) ?? 'fixed';
+    const startingBudget = interaction.options.getInteger('starting_budget', true);
+
+    if (startingBudget < 1 || startingBudget > 1000) {
+        await interaction.reply(errorReplyBuilder({
+            description: `Starting budget must be between **1** and **1000**.`,
+        }));
+        return;
+    }
     
     const auction = auctions.getByName(interaction.guildId!, auctionName);
     if (!auction) {
@@ -83,7 +91,7 @@ export async function startAuction(interaction: ChatInputCommandInteraction) {
     auction.channelId = interaction.channelId!;
     auction.status = 'LIVE';
     auction.rules = {
-        startingBudget: 100,
+        startingBudget,
         roundDurationMs: minsToMs(2),
         maxSlavesPerMaster: Math.ceil(auction.slaves.size / auction.masters.size),
         priorityType: priorityType as 'fixed' | 'rotating',
@@ -91,7 +99,7 @@ export async function startAuction(interaction: ChatInputCommandInteraction) {
     };
     auction.state = {
         startedAt: Date.now(),
-        balances: new Map(Array.from(auction.masters.entries()).map(([id, master]) => [id, auction.rules?.startingBudget ?? 100])),
+        balances: new Map(Array.from(auction.masters.keys()).map(masterId => [masterId, startingBudget])),
         purchases: new Map(Array.from(auction.masters.entries()).map(([id, master]) => [id, []])),
     };
 
@@ -107,11 +115,12 @@ export async function startAuction(interaction: ChatInputCommandInteraction) {
         title: 'Rules of the auction',
         description: `- Each master will start with **${auction.rules?.startingBudget}🪙**`
             + `\n- Each master can acquire a maximum of **${auction.rules?.maxSlavesPerMaster}** slaves.`
-            + `\n- Each round will begin with one of the masters (in rotating order) declaring which slave they want to see being bid on next.`
-            + `\n- Each round can last a maximum of **${Math.round(auction.rules?.roundDurationMs / 1000 / 60)}** minutes. If a master has not placed their bid within this time, a bid of **1🪙** will be placed for them automatically.`
+            + `\n- Each round will begin with one of the masters (in rotating order) declaring which slave they'd like to see being bid on next. The master who nominated the slave **must** bid at least 1🪙 on it.`
+            + `\n- Each round can last a maximum of **${Math.round(auction.rules?.roundDurationMs / 1000 / 60)}** minutes. If a master has not placed their bid within this time, the minimum possible amount will be placed for them automatically.`
             + `\n- Masters must hold **at least** 1🪙 for each slave they're yet to acquire for their plantation.`
             + `\n- ${priorityType === 'fixed' ? 'Ties will be resolved based on the masters\' rankings. Higher-ranked masters will be given preference over lower-ranked masters.' : 'Priority order for resolving ties will keep rotating each round.'}`
             + `\n- The auction will end once all the slaves have been sold.`,
+        footer: `Use the \`/auction view-status\` command at any time to check the current status of the auction.`,
         color: 'violet-500'
     }));
 
@@ -130,8 +139,18 @@ export async function startAuction(interaction: ChatInputCommandInteraction) {
         title: 'Meet the slaves',
         description: 'The following slaves will be up for grabs in this auction:\n' + Array.from(auction.slaves.values()).map((slave, index) => {
             // return `${index + 1}. <@${slave.id}>\n  - **Specialties:** ${slave.specialties ?? 'None'}`;
-            return `${index + 1}. <@${slave.id}>`;
+            return `${index + 1}. <@${slave.id}> (${slave.specialty.toLowerCase()})`;
         }).join('\n'),
         color: 'violet-500'
     }));
+
+    await sleep(5000);
+
+    const firstNominatorId = startingPriorityOrder[0];
+    if (firstNominatorId) {
+        await interaction.followUp(replyBuilder({
+            description: `The first slave will be nominated by <@${firstNominatorId}>.`,
+            color: 'blue-400',
+        }));
+    }
 }

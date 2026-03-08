@@ -7,6 +7,7 @@ export type Bid = { amount: number; isAuto: boolean; submittedAt: epochMilliseco
 
 export type RoundState = {
     nomineeId: Slave["id"];
+    nominatedById?: Master["id"];
     nomineeTag?: string;
     nomineeAvatarURL?: string;
     startedAt: epochMilliseconds;
@@ -185,6 +186,12 @@ export class AuctionStore {
         return Array.from(guildMap.values())
                     .filter(auction => auction.status !== 'CLOSED')
                     .map(auction => auction.name);
+    }
+
+    listAuctionNames(guildId: string): string[] {
+        const guildMap = this.byGuildId.get(guildId);
+        if (!guildMap) return [];
+        return Array.from(guildMap.values()).map(auction => auction.name);
     }
 
     updateSlaveSpecialty(guildId: string, userId: string, userTag: string, specialty: Slave["specialty"]) {

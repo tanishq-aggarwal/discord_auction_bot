@@ -110,6 +110,14 @@ const commands = [
           .setRequired(true)
           .setAutocomplete(true)
       )
+      .addIntegerOption(opt =>
+        opt
+          .setName('starting_budget')
+          .setDescription('Starting budget for each master')
+          .setRequired(true)
+          .setMinValue(1)
+          .setMaxValue(1000)
+      )
       .addStringOption(opt =>
         opt
           .setName('priority_order')
@@ -157,11 +165,53 @@ const commands = [
           .setDescription('Pick a slave to be nominated for this round')
           .setRequired(true)
       )
+      .addUserOption(opt =>
+        opt
+          .setName('nominated_by')
+          .setDescription('Pick the master who nominated this slave')
+          .setRequired(true)
+      )
   )
   .addSubcommand(sub =>
     sub
       .setName('cancel-current-round')
       .setDescription('Interrupt the currently active round')
+      .addStringOption(opt =>
+        opt
+          .setName('auction_name')
+          .setDescription('Auction name')
+          .setRequired(true)
+          .setAutocomplete(true)
+      )
+  )
+  .addSubcommand(sub =>
+    sub
+      .setName('undo-last-round')
+      .setDescription('Undo all changes from the previous completed round')
+      .addStringOption(opt =>
+        opt
+          .setName('auction_name')
+          .setDescription('Auction name')
+          .setRequired(true)
+          .setAutocomplete(true)
+      )
+  )
+  .addSubcommand(sub =>
+    sub
+      .setName('view-status')
+      .setDescription('View the current auction status summary')
+      .addStringOption(opt =>
+        opt
+          .setName('auction_name')
+          .setDescription('Auction name')
+          .setRequired(true)
+          .setAutocomplete(true)
+      )
+  )
+  .addSubcommand(sub =>
+    sub
+      .setName('view-participants')
+      .setDescription('View the masters and slaves configured for an auction')
       .addStringOption(opt =>
         opt
           .setName('auction_name')

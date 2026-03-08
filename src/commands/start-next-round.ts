@@ -16,12 +16,14 @@ import {
 import type { Auction, Master } from "../database/auctionStore.js";
 import { auctions } from "../database/global.js";
 import { sleep } from "../utils/common.js";
-import { colorsMap, errorReplyBuilder, getRelativeDiscordTimestamp } from "../utils/discord-utils.js";
+import { colorsMap, errorReplyBuilder, getRelativeDiscordTimestamp, replyBuilder } from "../utils/discord-utils.js";
+import { buildAuctionStatusEmbed } from "./view-status.js";
 
 const OPEN_BID_OVERVIEW_PREFIX = "auction:open-bid-overview";
 const PLACE_BID_PREFIX = "auction:place-bid";
 const BID_MODAL_PREFIX = "auction:submit-bid";
 const BID_REVEAL_DELAY_MS = 15_000;
+const POST_REVEAL_STATUS_DELAY_MS = 5_000;
 const EPHEMERAL_OVERVIEW_TTL_MS = 15 * 60 * 1000;
 
 type ActiveRoundState = NonNullable<Auction["currentRoundState"]>;
@@ -93,7 +95,7 @@ async function deleteOverviewMessageAfterBid(interaction: ModalSubmitInteraction
 
 function getRemainingSlots(auction: Auction, masterId: string): number {
     const maxSlaves = auction.rules!.maxSlavesPerMaster;
-    const purchasedCount = auction.state!.purchases.get(masterId)!.length;
+    const purchasedCount = auction.state!.purchases.get(masterId)?.length ?? 0;
     return maxSlaves - purchasedCount;
 }
 
@@ -109,7 +111,13 @@ function computeMaxBidAllowed(auction: Auction, masterId: string): number {
 }
 
 function getEligibleMasterIdsForRound(auction: Auction): Master["id"][] {
-    return Array.from(auction.masters.keys()).filter(masterId => computeMaxBidAllowed(auction, masterId) >= 1);
+    return Array.from(auction.masters.keys()).filter(masterId => computeMaxBidAllowed(auction, masterId) >= getMinimumBidForRound(auction, masterId));
+}
+
+function getMinimumBidForRound(auction: Auction, masterId: string): number {
+    const nominatedById = auction.currentRoundState?.nominatedById;
+    if (!nominatedById) return 1;
+    return nominatedById === masterId ? 1 : 0;
 }
 
 function buildMasterOverviewEmbed(auction: Auction, masterId: string): EmbedBuilder {
@@ -160,6 +168,21 @@ function rotatePriorityOrder(priorityOrder: Master["id"][]): Master["id"][] {
     return priorityOrder.slice(1).concat(priorityOrder.slice(0, 1));
 }
 
+function getNextMasterInStartingOrder(auction: Auction, currentMasterId: string | undefined): Master["id"] | null {
+    const order = auction.rules?.startingPriorityOrder ?? [];
+    if (!order.length) return null;
+    if (!currentMasterId) return order[0]!;
+
+    const currentIndex = order.indexOf(currentMasterId);
+    if (currentIndex === -1) return order[0]!;
+    return order[(currentIndex + 1) % order.length]!;
+}
+
+function getExpectedNominatorIdForNewRound(auction: Auction): Master["id"] | null {
+    const lastNominatorId = auction.lastRoundState?.nominatedById;
+    return getNextMasterInStartingOrder(auction, lastNominatorId);
+}
+
 function areAllBidsReceived(auction: Auction): boolean {
     const eligibleMasterIds = getEligibleMasterIdsForRound(auction);
     return eligibleMasterIds.every(masterId => auction.currentRoundState!.bids.has(masterId));
@@ -173,7 +196,7 @@ function autoSubmitMissingBids(auction: Auction, round: ActiveRoundState) {
     for (const masterId of getEligibleMasterIdsForRound(auction)) {
         if (round.bids.has(masterId)) continue;
         round.bids.set(masterId, {
-            amount: 1,
+            amount: getMinimumBidForRound(auction, masterId),
             isAuto: true,
             submittedAt: Date.now(),
         });
@@ -228,10 +251,16 @@ function buildRoundRevealEmbed(auction: Auction, round: ActiveRoundState, winner
         .setTitle(`🔔 Results for ${nominee?.tag ?? `<@${round.nomineeId}>`} 🔔`)
         .setDescription(
             `\nThe bids are in for <@${round.nomineeId}>!\n\n` +
-            `${bidsList}\n\n\n` +
-            `**🔨 Going once... going twice... SOLD! to <@${winnerId}> for ${winningBid}🪙**`
+            `${bidsList}\n\n` +
+            `**🔨 Going once... going twice... and SOLD! to <@${winnerId}> for ${winningBid}🪙**`
         )
         .setThumbnail(round.nomineeAvatarURL ?? null);
+}
+
+function buildNextNominatorEmbed(masterId: string): EmbedBuilder {
+    return new EmbedBuilder()
+        .setColor(colorsMap["blue-400"])
+        .setDescription(`The next slave will be nominated by <@${masterId}>.`);
 }
 
 async function finalizeRound({
@@ -298,17 +327,33 @@ async function finalizeRound({
         auction.lastRoundState = round;
         delete auction.currentRoundState;
 
-        if (isAuctionSoldOut(auction)) {
+        const didCloseAuction = isAuctionSoldOut(auction);
+        if (didCloseAuction) {
             auction.status = "CLOSED";
             auction.state!.endedAt = Date.now();
         }
 
         if (channel?.isTextBased() && "send" in channel) {
-            await channel.send({ embeds: [buildRoundRevealEmbed(auction, round, winnerId, winningBid)] });
+            await channel.send({ embeds: [buildRoundRevealEmbed(auction, round, winnerId, winningBid)], content: `<@${round.nomineeId}>` });
+            const nextNominatorId = getNextMasterInStartingOrder(auction, round.nominatedById);
+            if (!didCloseAuction && nextNominatorId) {
+                await sleep(3000);
+                await channel.send({ embeds: [buildNextNominatorEmbed(nextNominatorId)] });
+            }
+
+            if (didCloseAuction) {
+                const auctionOverMessage = replyBuilder({
+                    title: "Auction Complete 🏁",
+                    description: "The auction is now over! All the slaves have been assigned to their respective masters, doomed to work for them till the end of time.",
+                    color: "blue-400",
+                });
+                if (auctionOverMessage.embeds?.length) {
+                    await channel.send({ embeds: auctionOverMessage.embeds });
+                }
+            }
         }
 
-
-        // TODO: Reveal auction state to all masters
+        
     }
     finally {
         finalizingRounds.delete(round);
@@ -341,12 +386,12 @@ function validateBidInteraction(auction: Auction, masterId: string): string | nu
         return `You already reached your slave cap (${auction.rules!.maxSlavesPerMaster}).`;
     }
 
-    const balance = auction.state!.balances.get(masterId)!;
-    if (balance <= 0) return "You have no coins left.";
-
     const maxBidAllowed = computeMaxBidAllowed(auction, masterId);
-    if (maxBidAllowed < 1) {
-        return "You cannot bid this round due to reserve constraints.";
+    const minBidRequired = getMinimumBidForRound(auction, masterId);
+    if (maxBidAllowed < minBidRequired) {
+        return minBidRequired === 0
+            ? "You cannot bid this round due to reserve constraints."
+            : `You must bid at least ${minBidRequired}🪙 this round, but your max allowed bid is ${maxBidAllowed}🪙.`;
     }
 
     return null;
@@ -402,10 +447,11 @@ function buildBiddingRoundEmbed(auction: Auction) {
         // .setTitle(nominee.tag)
         .setDescription(
                 // `(${nominee.specialties ?? "None"})\n\n` +
-                `\n\nBidding has been opened for <@${nominee.id}>!\n` +
-                `Ends ${getRelativeDiscordTimestamp(round.deadline)}\n\n\n` +
-                `**Priority Order For Resolving Ties**\n${round.priorityOrder.map(masterId => `<@${masterId}>`).join(" > ")}\n\n\n` +
-                `**Bidding Progress** (${bidsCount}/${eligibleMasterIds.length})\n` +
+                `\n\nBidding has been opened for <@${nominee.id}>!` +
+                // `Nominated by: ${round.nominatedById ? `<@${round.nominatedById}>` : "_Unknown_"}\n` +
+                `\nEnds ${getRelativeDiscordTimestamp(round.deadline)}` +
+                `\n\n\n**Priority Order For Resolving Ties**\n${round.priorityOrder.map(masterId => `<@${masterId}>`).join(" > ")}` +
+                `\n\n\n**Bidding Progress** (${bidsCount}/${eligibleMasterIds.length})\n` +
                 bidProgress
         )
         .setThumbnail(round.nomineeAvatarURL ?? null)
@@ -430,6 +476,7 @@ function createRoundActionRow(auction: Auction): ActionRowBuilder<ButtonBuilder>
 export async function startNextRound(interaction: ChatInputCommandInteraction) {
     const auctionName = interaction.options.getString("auction_name", true);
     const nominatedSlave = interaction.options.getUser("nominated_slave", true);
+    const nominatedBy = interaction.options.getUser("nominated_by", true);
 
     const auction = auctions.getByName(interaction.guildId!, auctionName);
     if (!auction) {
@@ -453,6 +500,23 @@ export async function startNextRound(interaction: ChatInputCommandInteraction) {
         await interaction.reply(errorReplyBuilder({ description: `<@${nominatedSlave.id}> is not a slave in this auction. Please select a valid slave.` }));
         return;
     }
+    if (!auction.masters.has(nominatedBy.id)) {
+        await interaction.reply(errorReplyBuilder({ description: `<@${nominatedBy.id}> is not a master in this auction. Please select a valid nominator.` }));
+        return;
+    }
+    const expectedNominatorId = getExpectedNominatorIdForNewRound(auction);
+    if (expectedNominatorId && nominatedBy.id !== expectedNominatorId) {
+        await interaction.reply(errorReplyBuilder({
+            description: `It is currently <@${expectedNominatorId}>'s turn to nominate.`,
+        }));
+        return;
+    }
+    if (computeMaxBidAllowed(auction, nominatedBy.id) < 1) {
+        await interaction.reply(errorReplyBuilder({
+            description: `<@${nominatedBy.id}> must be able to bid at least **1🪙** as the nominator. Choose another nominator.`,
+        }));
+        return;
+    }
 
     const ownedByMaster = getOwnerId(auction, nominatedSlave.id);
     if (ownedByMaster) {
@@ -473,6 +537,7 @@ export async function startNextRound(interaction: ChatInputCommandInteraction) {
     const now = Date.now();
     auction.currentRoundState = {
         nomineeId: nominatedSlave.id,
+        nominatedById: nominatedBy.id,
         nomineeTag: nominatedSlave.tag,
         nomineeAvatarURL: nominatedSlave.displayAvatarURL(),
         startedAt: now,
@@ -539,12 +604,12 @@ export async function handlePlaceBidButton(interaction: ButtonInteraction) {
 
     const input = new TextInputBuilder()
         .setCustomId("amount")
-        .setLabel(`Enter bid amount (max ${maxBidAllowed}🪙)`)
+        .setLabel(`Enter bid amount (${getMinimumBidForRound(auction, interaction.user.id)}-${maxBidAllowed}🪙)`)
         .setStyle(TextInputStyle.Short)
-        .setPlaceholder(`1 - ${maxBidAllowed}`)
+        .setPlaceholder(`${getMinimumBidForRound(auction, interaction.user.id)} - ${maxBidAllowed}`)
         .setRequired(true)
         .setMinLength(1)
-        .setMaxLength(3);
+        .setMaxLength(4);
 
     const row = new ActionRowBuilder<TextInputBuilder>().addComponents(input);
     modal.addComponents(row);
@@ -570,12 +635,13 @@ export async function handlePlaceBidModal(interaction: ModalSubmitInteraction) {
     }
 
     const maxBidAllowed = computeMaxBidAllowed(auction, interaction.user.id);
+    const minBidRequired = getMinimumBidForRound(auction, interaction.user.id);
     const rawBid = interaction.fields.getTextInputValue("amount").trim();
     const bidAmount = Number(rawBid);
 
-    if (!Number.isInteger(bidAmount) || bidAmount < 1 || bidAmount > maxBidAllowed) {
+    if (!Number.isInteger(bidAmount) || bidAmount < minBidRequired || bidAmount > maxBidAllowed) {
         await interaction.reply(errorReplyBuilder({
-            description: `Invalid bid. Please enter an amount between 1 and ${maxBidAllowed}.`,
+            description: `Invalid bid. Please enter an amount between ${minBidRequired} and ${maxBidAllowed}.`,
         }));
         return true;
     }

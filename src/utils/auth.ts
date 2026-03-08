@@ -11,7 +11,7 @@ export async function verifyAuctionAdmin(interaction: ChatInputCommandInteractio
 
     if (!adminRoleId) {
         await interaction.reply(errorReplyBuilder(
-            { message: 'Auction management role has not been configured yet. Ask a server admin to run the `/auction set-admin-role` command.' }
+            { description: 'Auction management role has not been configured yet. Ask a server admin to run the `/auction set-admin-role` command.' }
         ));
         return;
     }
@@ -27,7 +27,7 @@ export async function verifyAuctionAdmin(interaction: ChatInputCommandInteractio
     if (roleIds.includes(adminRoleId)) return true;
     else {
         await interaction.reply(errorReplyBuilder(
-            { message: `You need the <@&${adminRoleId}> role to run this command.` }
+            { description: `You need the <@&${adminRoleId}> role to run this command.` }
         ));
         return false;
     }
