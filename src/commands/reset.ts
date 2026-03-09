@@ -1,5 +1,5 @@
 import type { ChatInputCommandInteraction } from "discord.js";
-import { auctions } from "../database/global.js";
+import { auctions, persistState } from "../database/global.js";
 import { errorReplyBuilder, replyBuilder } from "../utils/discord-utils.js";
 
 export async function resetAuction(interaction: ChatInputCommandInteraction) {
@@ -23,6 +23,7 @@ export async function resetAuction(interaction: ChatInputCommandInteraction) {
     delete auction['rules'];
     auction.channelId = null;
     auction.status = 'INIT';
+    persistState();
 
     console.log(`[auction:reset] ${auction.name}`);
     await interaction.reply(replyBuilder({ description: `Auction **${auctionName}** has been reset.` }));

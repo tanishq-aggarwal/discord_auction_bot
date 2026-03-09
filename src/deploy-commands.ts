@@ -1,5 +1,13 @@
-import 'dotenv/config';
+import { createRequire } from 'node:module';
 import { REST, Routes, SlashCommandBuilder } from 'discord.js';
+
+const require = createRequire(import.meta.url);
+try {
+  // Optional in cloud runtimes where env vars are injected by the platform.
+  require('dotenv/config');
+} catch {
+  // No-op: continue with process.env as provided by host environment.
+}
 
 const token = process.env.DISCORD_TOKEN!;
 const clientId = process.env.CLIENT_ID!;
@@ -22,6 +30,14 @@ const commands = [
       .setDescription('Create a new auction')
       .addStringOption(opt =>
         opt.setName('auction_name').setDescription('Name of the auction').setRequired(true),
+      ),
+  )
+  .addSubcommand(sub =>
+    sub
+      .setName('delete')
+      .setDescription('Delete an auction from storage')
+      .addStringOption(opt =>
+        opt.setName('auction_name').setDescription('Auction name').setRequired(true).setAutocomplete(true),
       ),
   )
   .addSubcommand(sub =>

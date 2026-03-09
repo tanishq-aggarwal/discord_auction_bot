@@ -1,6 +1,6 @@
 // https://discord.com/oauth2/authorize?client_id=1477614199340404839&permissions=274877991936&integration_type=0&scope=bot+applications.commands
 
-import 'dotenv/config';
+import { createRequire } from 'node:module';
 import {
     Client, Events, GatewayIntentBits, MessageFlags, PermissionFlagsBits,
     ActionRowBuilder,
@@ -17,8 +17,9 @@ import { randomUUID } from 'node:crypto';
 import { errorReplyBuilder, getRelativeDiscordTimestamp, replyBuilder } from './utils/discord-utils.js';
 import { isServerAdmin, verifyAuctionAdmin } from './utils/auth.js';
 import { setAdminRole } from './commands/set-admin-role.js';
-import { auctions } from './database/global.js';
+import { auctions, persistState } from './database/global.js';
 import { createAuction } from './commands/create.js';
+import { deleteAuction } from './commands/delete.js';
 import { addSlave } from './commands/add-slave.js';
 import { addMaster } from './commands/add-master.js';
 import { removeMaster } from './commands/remove-master.js';
@@ -33,6 +34,15 @@ import { undoLastRound } from './commands/undo-last-round.js';
 import { viewStatus } from './commands/view-status.js';
 import { viewParticipants } from './commands/view-participants.js';
 
+const require = createRequire(import.meta.url);
+try {
+    // Optional in cloud runtimes where env vars are injected by the platform.
+    require('dotenv/config');
+}
+catch {
+    // No-op: continue with process.env as provided by host environment.
+}
+
 
 // Handle autocompletion interactions
 async function handleAutocompleteInteraction(interaction: AutocompleteInteraction) {
@@ -45,7 +55,7 @@ async function handleAutocompleteInteraction(interaction: AutocompleteInteractio
 
     if (focused.name === 'auction_name') {
         const subcommand = interaction.options.getSubcommand();
-        const names = (subcommand === 'view-participants'
+        const names = (subcommand === 'view-participants' || subcommand === 'delete'
             ? auctions.listAuctionNames(interaction.guildId)
             : auctions.listOpenAuctionNames(interaction.guildId))
             .filter(n => n.toLowerCase().includes(typed));
@@ -117,29 +127,30 @@ async function handleChatInputInteraction(interaction: ChatInputCommandInteracti
     const subcommand = interaction.options.getSubcommand();
 
     // Enforce auth
-    // if (subcommand === 'set-admin-role') {
-    //     if (!isServerAdmin(interaction)) {
-    //         await interaction.reply(errorReplyBuilder(
-    //             { description: 'Only server administrators can run this command.', ephemeral: false }
-    //         ));
-    //         return;
-    //     }
-    // }
-    // else if (
-    //     subcommand === 'create' ||
-    //     subcommand === 'add-slave' ||
-    //     subcommand === 'add-master' ||
-    //     subcommand === 'remove-slave' ||
-    //     subcommand === 'remove-master' ||
-    //     subcommand === 'start' ||
-    //     subcommand === 'reset' ||
-    //     subcommand === 'start-next-round' ||
-    //     subcommand === 'cancel-current-round' ||
-    //     subcommand === 'undo-last-round' ||
-    //     subcommand === 'update-slave-specialty'
-    // ) {
-    //     if (!await verifyAuctionAdmin(interaction)) return;
-    // }
+    if (subcommand === 'set-admin-role') {
+        if (!isServerAdmin(interaction)) {
+            await interaction.reply(errorReplyBuilder(
+                { description: 'Only server administrators can run this command.', ephemeral: false }
+            ));
+            return;
+        }
+    }
+    else if (
+        subcommand === 'create' ||
+        subcommand === 'delete' ||
+        subcommand === 'add-slave' ||
+        subcommand === 'add-master' ||
+        subcommand === 'remove-slave' ||
+        subcommand === 'remove-master' ||
+        subcommand === 'start' ||
+        subcommand === 'reset' ||
+        subcommand === 'start-next-round' ||
+        subcommand === 'cancel-current-round' ||
+        subcommand === 'undo-last-round' ||
+        subcommand === 'update-slave-specialty'
+    ) {
+        if (!await verifyAuctionAdmin(interaction)) return;
+    }
 
 
     if (subcommand === 'set-admin-role') {
@@ -149,6 +160,9 @@ async function handleChatInputInteraction(interaction: ChatInputCommandInteracti
     
     else if (subcommand === 'create') {
         await createAuction(interaction);
+    }
+    else if (subcommand === 'delete') {
+        await deleteAuction(interaction);
     }
 
     else if (subcommand === 'add-slave') {
@@ -210,17 +224,26 @@ async function replyWithUnexpectedError(interaction: Interaction): Promise<void>
 
 async function handleInteractionSafely(interaction: Interaction): Promise<void> {
     try {
+        let shouldPersist = false;
         if (interaction.isAutocomplete()) {
             await handleAutocompleteInteraction(interaction);
         }
         else if (interaction.isChatInputCommand()) {
             await handleChatInputInteraction(interaction);
+            shouldPersist = true;
         }
         else if (interaction.isButton()) {
             await handlePlaceBidButton(interaction);
+            shouldPersist = true;
         }
         else if (interaction.isModalSubmit()) {
             await handlePlaceBidModal(interaction);
+            shouldPersist = true;
+        }
+
+        if (shouldPersist) {
+            // Persist after mutating interactions so state survives restarts.
+            persistState();
         }
     }
     catch (error) {
@@ -235,15 +258,15 @@ client.once(Events.ClientReady, (c) => {
     console.log(`${c.user.tag} is online!`);
 
     // Testing setup
-    const auction = auctions.create(
-        '1288936489534754826',
-        'test',
-    );
-    auctions.addSlave('1288936489534754826', 'test', '284509170412027905', 'deathstar6678', 'Attacker');
+    // const auction = auctions.create(
+    //     '1288936489534754826',
+    //     'test',
+    // );
+    // auctions.addSlave('1288936489534754826', 'test', '284509170412027905', 'deathstar6678', 'Attacker');
+    // auctions.addSlave('1288936489534754826', 'test', '1279092301825704038', 'jpk11.1', 'Base Builder');
     // auctions.addSlave('1288936489534754826', 'test', '1384661102251737169', 'godman_69', 'Base Builder');
-    auctions.addSlave('1288936489534754826', 'test', '1279092301825704038', 'jpk11.1', 'Base Builder');
     // auctions.addSlave('1288936489534754826', 'test', '678342626646163506', 'xanderheij', 'Attacker');
-    auctions.addMaster('1288936489534754826', 'test', '235648483003072512', 'spyke_x');
+    // auctions.addMaster('1288936489534754826', 'test', '235648483003072512', 'spyke_x');
     // auctions.addMaster('1288936489534754826', 'test', '1107882569799847968', 'rival_____');
 
 
@@ -263,6 +286,11 @@ client.once(Events.ClientReady, (c) => {
     // };
 });
 
+const persistenceInterval = setInterval(() => {
+    persistState();
+}, 5_000);
+persistenceInterval.unref();
+
 client.on(Events.Error, (error) => {
     console.error('[discord:client-error]', error);
 });
@@ -273,6 +301,16 @@ process.on('unhandledRejection', (reason) => {
 
 process.on('uncaughtException', (error) => {
     console.error('[process:uncaught-exception]', error);
+});
+
+process.on('SIGINT', () => {
+    persistState();
+    process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+    persistState();
+    process.exit(0);
 });
 
 client.on(Events.InteractionCreate, (interaction) => {

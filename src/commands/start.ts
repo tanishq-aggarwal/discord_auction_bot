@@ -1,5 +1,5 @@
 import type { ChatInputCommandInteraction } from "discord.js";
-import { auctions } from "../database/global.js";
+import { auctions, persistState } from "../database/global.js";
 import { errorReplyBuilder, replyBuilder } from "../utils/discord-utils.js";
 import { minsToMs, sleep } from "../utils/common.js";
 
@@ -102,6 +102,7 @@ export async function startAuction(interaction: ChatInputCommandInteraction) {
         balances: new Map(Array.from(auction.masters.keys()).map(masterId => [masterId, startingBudget])),
         purchases: new Map(Array.from(auction.masters.entries()).map(([id, master]) => [id, []])),
     };
+    persistState();
 
 
     console.log(`[auction:start] auction=${auction.name} rules=${JSON.stringify(auction.rules)}`);
@@ -116,8 +117,8 @@ export async function startAuction(interaction: ChatInputCommandInteraction) {
         description: `- Each master will start with **${auction.rules?.startingBudget}🪙**`
             + `\n- Each master can acquire a maximum of **${auction.rules?.maxSlavesPerMaster}** slaves.`
             + `\n- Each round will begin with one of the masters (in rotating order) declaring which slave they'd like to see being bid on next. The master who nominated the slave **must** bid at least 1🪙 on it.`
-            + `\n- Each round can last a maximum of **${Math.round(auction.rules?.roundDurationMs / 1000 / 60)}** minutes. If a master has not placed their bid within this time, the minimum possible amount will be placed for them automatically.`
             + `\n- Masters must hold **at least** 1🪙 for each slave they're yet to acquire for their plantation.`
+            + `\n- Each round can last a maximum of **${Math.round(auction.rules?.roundDurationMs / 1000 / 60)}** minutes. If a master has not placed their bid within this time, the minimum possible amount will be placed for them automatically.`
             + `\n- ${priorityType === 'fixed' ? 'Ties will be resolved based on the masters\' rankings. Higher-ranked masters will be given preference over lower-ranked masters.' : 'Priority order for resolving ties will keep rotating each round.'}`
             + `\n- The auction will end once all the slaves have been sold.`,
         footer: `Use the \`/auction view-status\` command at any time to check the current status of the auction.`,

@@ -63,6 +63,24 @@ export type Slave = DiscordUser & {
     specialty: "Base Builder" | "Attacker" | "All Rounder" | "Water Boy";
 };
 
+type SerializableRoundState = Omit<RoundState, "bids" | "timeoutHandle"> & {
+    bids: Array<[Master["id"], Bid]>;
+};
+
+type SerializableAuctionState = Omit<AuctionState, "balances" | "purchases"> & {
+    balances: Array<[Master["id"], number]>;
+    purchases: Array<[Master["id"], Slave["id"][]]>;
+};
+
+type SerializableAuction = Omit<Auction, "slaves" | "masters" | "state" | "currentRoundState" | "lastRoundState"> & {
+    slaves: Array<[Slave["id"], Slave]>;
+    masters: Array<[Master["id"], Master]>;
+    state?: SerializableAuctionState;
+    currentRoundState?: SerializableRoundState;
+    lastRoundState?: SerializableRoundState;
+};
+
+type SerializableAuctionsByGuild = Record<Auction["guildId"], Record<Auction["name"], SerializableAuction>>;
 
 
 export class AuctionStore {
@@ -83,7 +101,7 @@ export class AuctionStore {
         }
 
         if (guildMap.has(auctionName)) {
-            throw new Error(`Auction **${name}** already exists in this server.`);
+            throw new Error(`Auction **${auctionName}** already exists in this server.`);
         }
 
         const auction: Auction = {
@@ -194,6 +212,25 @@ export class AuctionStore {
         return Array.from(guildMap.values()).map(auction => auction.name);
     }
 
+    delete(guildId: string, auctionName: string): Auction {
+        const guildMap = this.byGuildId.get(guildId);
+        if (!guildMap) {
+            throw new Error(`Auction **${auctionName}** not found.`);
+        }
+
+        const auction = guildMap.get(auctionName);
+        if (!auction) {
+            throw new Error(`Auction **${auctionName}** not found.`);
+        }
+
+        guildMap.delete(auctionName);
+        if (guildMap.size === 0) {
+            this.byGuildId.delete(guildId);
+        }
+
+        return auction;
+    }
+
     updateSlaveSpecialty(guildId: string, userId: string, userTag: string, specialty: Slave["specialty"]) {
         const auctions = this.byGuildId.get(guildId);
         if (!auctions) throw new Error(`No auctions found for this server.`);
@@ -206,5 +243,101 @@ export class AuctionStore {
             }
         }
         if (!foundSlave) throw new Error(`**${userTag}** has not been enslaved in any auctions.`);
+    }
+
+    toSerializable(): SerializableAuctionsByGuild {
+        const serialized: SerializableAuctionsByGuild = {};
+
+        for (const [guildId, guildAuctions] of this.byGuildId.entries()) {
+            serialized[guildId] = {};
+            for (const [auctionName, auction] of guildAuctions.entries()) {
+                const serializedAuction: SerializableAuction = {
+                    id: auction.id,
+                    guildId: auction.guildId,
+                    channelId: auction.channelId,
+                    name: auction.name,
+                    status: auction.status,
+                    createdAt: auction.createdAt,
+                    slaves: Array.from(auction.slaves.entries()),
+                    masters: Array.from(auction.masters.entries()),
+                };
+                if (auction.rules) {
+                    serializedAuction.rules = auction.rules;
+                }
+                if (auction.state) {
+                    serializedAuction.state = {
+                        ...auction.state,
+                        balances: Array.from(auction.state.balances.entries()),
+                        purchases: Array.from(auction.state.purchases.entries()),
+                    };
+                }
+                if (auction.currentRoundState) {
+                    const { timeoutHandle, ...roundWithoutTimeout } = auction.currentRoundState;
+                    serializedAuction.currentRoundState = {
+                        ...roundWithoutTimeout,
+                        bids: Array.from(auction.currentRoundState.bids.entries()),
+                    };
+                }
+                if (auction.lastRoundState) {
+                    const { timeoutHandle, ...lastRoundWithoutTimeout } = auction.lastRoundState;
+                    serializedAuction.lastRoundState = {
+                        ...lastRoundWithoutTimeout,
+                        bids: Array.from(auction.lastRoundState.bids.entries()),
+                    };
+                }
+                serialized[guildId][auctionName] = serializedAuction;
+            }
+        }
+
+        return serialized;
+    }
+
+    hydrate(serialized: SerializableAuctionsByGuild): void {
+        this.byGuildId.clear();
+
+        for (const [guildId, guildAuctions] of Object.entries(serialized ?? {})) {
+            const guildMap = new Map<string, Auction>();
+
+            for (const [auctionName, auction] of Object.entries(guildAuctions ?? {})) {
+                const hydratedAuction: Auction = {
+                    id: auction.id,
+                    guildId: auction.guildId,
+                    channelId: auction.channelId,
+                    name: auction.name,
+                    status: auction.status,
+                    createdAt: auction.createdAt,
+                    slaves: new Map(auction.slaves),
+                    masters: new Map(auction.masters),
+                };
+                if (auction.rules) {
+                    hydratedAuction.rules = auction.rules;
+                }
+                if (auction.state) {
+                    hydratedAuction.state = {
+                        ...auction.state,
+                        balances: new Map(auction.state.balances),
+                        purchases: new Map(auction.state.purchases),
+                    };
+                }
+                if (auction.lastRoundState) {
+                    hydratedAuction.lastRoundState = {
+                        ...auction.lastRoundState,
+                        bids: new Map(auction.lastRoundState.bids),
+                    };
+                }
+
+                // If the process restarts mid-round, discard the stale runtime-only round.
+                if (!hydratedAuction.lastRoundState && auction.currentRoundState) {
+                    hydratedAuction.lastRoundState = {
+                        ...auction.currentRoundState,
+                        bids: new Map(auction.currentRoundState.bids),
+                    };
+                }
+
+                guildMap.set(auctionName, hydratedAuction);
+            }
+
+            this.byGuildId.set(guildId, guildMap);
+        }
     }
 }

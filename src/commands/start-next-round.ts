@@ -14,7 +14,7 @@ import {
     type ChatInputCommandInteraction,
 } from "discord.js";
 import type { Auction, Master } from "../database/auctionStore.js";
-import { auctions } from "../database/global.js";
+import { auctions, persistState } from "../database/global.js";
 import { sleep } from "../utils/common.js";
 import { colorsMap, errorReplyBuilder, getRelativeDiscordTimestamp, replyBuilder } from "../utils/discord-utils.js";
 import { buildAuctionStatusEmbed } from "./view-status.js";
@@ -291,14 +291,29 @@ async function finalizeRound({
         if (!isRoundStillActive(auction, round)) return;
         if (!areAllBidsReceived(auction)) return;
 
-        await editBiddingRoundMessage(client, auction);
+        try {
+            await editBiddingRoundMessage(client, auction);
+        }
+        catch (error) {
+            console.warn("[auction:round-finalize:edit-round-message]", error);
+        }
 
         let channel: Awaited<ReturnType<Client["channels"]["fetch"]>> | null = null;
         if (auction.channelId) {
-            channel = await client.channels.fetch(auction.channelId);
+            try {
+                channel = await client.channels.fetch(auction.channelId);
+            }
+            catch (error) {
+                console.warn("[auction:round-finalize:fetch-channel]", error);
+            }
         }
         if (channel?.isTextBased() && "send" in channel) {
-            await channel.send({ embeds: [buildAllBidsReceivedEmbed(round)] });
+            try {
+                await channel.send({ embeds: [buildAllBidsReceivedEmbed(round)] });
+            }
+            catch (error) {
+                console.warn("[auction:round-finalize:announce-close]", error);
+            }
         }
 
         await sleep(BID_REVEAL_DELAY_MS);
@@ -306,17 +321,23 @@ async function finalizeRound({
 
         const winningResult = getRoundWinner(auction, round);
         if (!winningResult) {
-            if (channel?.isTextBased() && "send" in channel) {
-                await channel.send({
-                    embeds: [
-                        new EmbedBuilder()
-                            .setColor(colorsMap['blue-400'])
-                            .setDescription(`No eligible bids were submitted for <@${round.nomineeId}> this round.`),
-                    ],
-                });
-            }
             auction.lastRoundState = round;
             delete auction.currentRoundState;
+            persistState();
+            if (channel?.isTextBased() && "send" in channel) {
+                try {
+                    await channel.send({
+                        embeds: [
+                            new EmbedBuilder()
+                                .setColor(colorsMap['blue-400'])
+                                .setDescription(`No eligible bids were submitted for <@${round.nomineeId}> this round.`),
+                        ],
+                    });
+                }
+                catch (error) {
+                    console.warn("[auction:round-finalize:no-winner-message]", error);
+                }
+            }
             return;
         }
         const { winnerId, winningBid } = winningResult;
@@ -332,13 +353,24 @@ async function finalizeRound({
             auction.status = "CLOSED";
             auction.state!.endedAt = Date.now();
         }
+        persistState();
 
         if (channel?.isTextBased() && "send" in channel) {
-            await channel.send({ embeds: [buildRoundRevealEmbed(auction, round, winnerId, winningBid)], content: `<@${round.nomineeId}>` });
+            try {
+                await channel.send({ embeds: [buildRoundRevealEmbed(auction, round, winnerId, winningBid)], content: `<@${round.nomineeId}>` });
+            }
+            catch (error) {
+                console.warn("[auction:round-finalize:reveal-message]", error);
+            }
             const nextNominatorId = getNextMasterInStartingOrder(auction, round.nominatedById);
             if (!didCloseAuction && nextNominatorId) {
                 await sleep(3000);
-                await channel.send({ embeds: [buildNextNominatorEmbed(nextNominatorId)] });
+                try {
+                    await channel.send({ embeds: [buildNextNominatorEmbed(nextNominatorId)] });
+                }
+                catch (error) {
+                    console.warn("[auction:round-finalize:next-nominator-message]", error);
+                }
             }
 
             if (didCloseAuction) {
@@ -348,7 +380,12 @@ async function finalizeRound({
                     color: "blue-400",
                 });
                 if (auctionOverMessage.embeds?.length) {
-                    await channel.send({ embeds: auctionOverMessage.embeds });
+                    try {
+                        await channel.send({ embeds: auctionOverMessage.embeds });
+                    }
+                    catch (error) {
+                        console.warn("[auction:round-finalize:auction-over-message]", error);
+                    }
                 }
             }
         }
@@ -556,6 +593,7 @@ export async function startNextRound(interaction: ChatInputCommandInteraction) {
     });
     const roundMessageId = (await response.fetch()).id;
     auction.currentRoundState.statusMessageId = roundMessageId;
+    persistState();
     scheduleRoundDeadline(interaction.client, auction, auction.currentRoundState);
 }
 
@@ -651,6 +689,7 @@ export async function handlePlaceBidModal(interaction: ModalSubmitInteraction) {
         isAuto: false,
         submittedAt: Date.now(),
     });
+    persistState();
 
     await interaction.deferUpdate();
     await deleteOverviewMessageAfterBid(interaction, auction.id);

@@ -1,5 +1,5 @@
 import type { ChatInputCommandInteraction } from "discord.js";
-import { auctions } from "../database/global.js";
+import { auctions, persistState } from "../database/global.js";
 import { errorReplyBuilder, replyBuilder } from "../utils/discord-utils.js";
 
 export async function cancelCurrentRound(interaction: ChatInputCommandInteraction) {
@@ -39,6 +39,7 @@ export async function cancelCurrentRound(interaction: ChatInputCommandInteractio
     }
 
     delete auction.currentRoundState;
+    persistState();
 
     if (auction.channelId) {
         try {

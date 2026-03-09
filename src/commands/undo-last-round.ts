@@ -1,6 +1,6 @@
 import type { ChatInputCommandInteraction } from "discord.js";
 import type { Auction, Master, RoundState } from "../database/auctionStore.js";
-import { auctions } from "../database/global.js";
+import { auctions, persistState } from "../database/global.js";
 import { errorReplyBuilder, replyBuilder } from "../utils/discord-utils.js";
 
 function getRoundWinner(round: RoundState): { winnerId: Master["id"]; winningBid: number } | null {
@@ -70,6 +70,7 @@ export async function undoLastRound(interaction: ChatInputCommandInteraction) {
     const winningResult = getRoundWinner(lastRound);
     if (!winningResult) {
         delete auction.lastRoundState;
+        persistState();
         await interaction.reply(replyBuilder({
             description: `Previous round for <@${lastRound.nomineeId}> had no winning bid, so there were no state changes to revert.`,
         }));
@@ -90,6 +91,7 @@ export async function undoLastRound(interaction: ChatInputCommandInteraction) {
         auction.status = "LIVE";
         delete auction.state.endedAt;
     }
+    persistState();
 
     console.log(`[auction:undo-last-round] auction=${auction.name} nominee=${lastRound.nomineeTag ?? lastRound.nomineeId} winner=${winningResult.winnerId} bid=${winningResult.winningBid}`);
     await interaction.reply(replyBuilder({
