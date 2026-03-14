@@ -168,14 +168,31 @@ function rotatePriorityOrder(priorityOrder: Master["id"][]): Master["id"][] {
     return priorityOrder.slice(1).concat(priorityOrder.slice(0, 1));
 }
 
+function canMasterNominate(auction: Auction, masterId: string): boolean {
+    return getRemainingSlots(auction, masterId) > 0 && computeMaxBidAllowed(auction, masterId) >= 1;
+}
+
 function getNextMasterInStartingOrder(auction: Auction, currentMasterId: string | undefined): Master["id"] | null {
     const order = auction.rules?.startingPriorityOrder ?? [];
     if (!order.length) return null;
-    if (!currentMasterId) return order[0]!;
+
+    if (!currentMasterId) {
+        return order.find(masterId => canMasterNominate(auction, masterId)) ?? null;
+    }
 
     const currentIndex = order.indexOf(currentMasterId);
-    if (currentIndex === -1) return order[0]!;
-    return order[(currentIndex + 1) % order.length]!;
+    if (currentIndex === -1) {
+        return order.find(masterId => canMasterNominate(auction, masterId)) ?? null;
+    }
+
+    for (let offset = 1; offset <= order.length; offset += 1) {
+        const candidateId = order[(currentIndex + offset) % order.length]!;
+        if (canMasterNominate(auction, candidateId)) {
+            return candidateId;
+        }
+    }
+
+    return null;
 }
 
 function getExpectedNominatorIdForNewRound(auction: Auction): Master["id"] | null {
