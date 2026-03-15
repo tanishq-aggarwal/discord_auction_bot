@@ -111,7 +111,10 @@ function computeMaxBidAllowed(auction: Auction, masterId: string): number {
 }
 
 function getEligibleMasterIdsForRound(auction: Auction): Master["id"][] {
-    return Array.from(auction.masters.keys()).filter(masterId => computeMaxBidAllowed(auction, masterId) >= getMinimumBidForRound(auction, masterId));
+    return Array.from(auction.masters.keys()).filter(masterId => {
+        if (getRemainingSlots(auction, masterId) <= 0) return false;
+        return computeMaxBidAllowed(auction, masterId) >= getMinimumBidForRound(auction, masterId);
+    });
 }
 
 function getMinimumBidForRound(auction: Auction, masterId: string): number {
@@ -169,7 +172,7 @@ function rotatePriorityOrder(priorityOrder: Master["id"][]): Master["id"][] {
 }
 
 function canMasterNominate(auction: Auction, masterId: string): boolean {
-    return getRemainingSlots(auction, masterId) > 0 && computeMaxBidAllowed(auction, masterId) >= 1;
+    return getRemainingSlots(auction, masterId) > 0;
 }
 
 function getNextMasterInStartingOrder(auction: Auction, currentMasterId: string | undefined): Master["id"] | null {
@@ -565,9 +568,9 @@ export async function startNextRound(interaction: ChatInputCommandInteraction) {
         }));
         return;
     }
-    if (computeMaxBidAllowed(auction, nominatedBy.id) < 1) {
+    if (getRemainingSlots(auction, nominatedBy.id) <= 0) {
         await interaction.reply(errorReplyBuilder({
-            description: `<@${nominatedBy.id}> must be able to bid at least **1🪙** as the nominator. Choose another nominator.`,
+            description: `<@${nominatedBy.id}> already reached the maximum number of purchases. Choose another nominator.`,
         }));
         return;
     }
