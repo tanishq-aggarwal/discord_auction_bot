@@ -2,22 +2,20 @@ import { type ChatInputCommandInteraction } from "discord.js";
 import { errorReplyBuilder, replyBuilder } from "../utils/discord-utils.js";
 import { auctions } from "../database/global.js";
 
-
 export async function createAuction(interaction: ChatInputCommandInteraction) {
-    const auctionName = interaction.options.getString('auction_name', true);
+    const auctionName = interaction.options.getString("auction_name", true);
 
     try {
-        const auction = auctions.create(
-            interaction.guildId!,
-            auctionName
-        );
+        const auction = auctions.create(interaction.guildId!, auctionName);
 
         console.log(`[auction:create] guild=${interaction.guildId} auction=${auctionName}`);
-        await interaction.reply(replyBuilder({
-            description: `Auction **${auction.name}** created.`,
-        }));
+        await interaction.reply(
+            replyBuilder({
+                description: `Auction **${auction.name}** created.`,
+            }),
+        );
     } catch (err) {
-        const message = err instanceof Error ? err.message : 'Failed to create auction.';
-        await interaction.reply(errorReplyBuilder({description: message}));
+        const message = err instanceof Error ? err.message : "Failed to create auction.";
+        await interaction.reply(errorReplyBuilder({ description: message }));
     }
 }

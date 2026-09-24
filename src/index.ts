@@ -1,320 +1,225 @@
-// https://discord.com/oauth2/authorize?client_id=1477614199340404839&permissions=274877991936&integration_type=0&scope=bot+applications.commands
-
-import { createRequire } from 'node:module';
+import "dotenv/config";
 import {
-    Client, Events, GatewayIntentBits, MessageFlags, PermissionFlagsBits,
-    ActionRowBuilder,
-    ButtonBuilder,
-    ButtonStyle,
-    ModalBuilder,
-    TextInputBuilder,
-    TextInputStyle,
-    ChatInputCommandInteraction,
-    AutocompleteInteraction,
+    Client,
+    Events,
+    GatewayIntentBits,
+    type AutocompleteInteraction,
+    type ChatInputCommandInteraction,
     type Interaction,
-} from 'discord.js';
-import { randomUUID } from 'node:crypto';
-import { errorReplyBuilder, getRelativeDiscordTimestamp, replyBuilder } from './utils/discord-utils.js';
-import { isServerAdmin, verifyAuctionAdmin } from './utils/auth.js';
-import { setAdminRole } from './commands/set-admin-role.js';
-import { auctions, persistState } from './database/global.js';
-import { createAuction } from './commands/create.js';
-import { deleteAuction } from './commands/delete.js';
-import { addSlave } from './commands/add-slave.js';
-import { addMaster } from './commands/add-master.js';
-import { removeMaster } from './commands/remove-master.js';
-import { removeSlave } from './commands/remove-slave.js';
-import { updateSlaveSpecialty } from './commands/update-slave-specialty.js';
-import { getPermutations } from './utils/common.js';
-import { startAuction } from './commands/start.js';
-import { resetAuction } from './commands/reset.js';
-import { handlePlaceBidButton, handlePlaceBidModal, startNextRound as startNextRoundCommand } from './commands/start-next-round.js';
-import { cancelCurrentRound } from './commands/cancel-current-round.js';
-import { undoLastRound } from './commands/undo-last-round.js';
-import { viewStatus } from './commands/view-status.js';
-import { viewParticipants } from './commands/view-participants.js';
+} from "discord.js";
+import { addMaster } from "./commands/add-master.js";
+import { addSlave } from "./commands/add-slave.js";
+import { cancelCurrentRound } from "./commands/cancel-current-round.js";
+import { getCommandRouteSpec, type CommandAccess } from "./commands/commandRegistry.js";
+import { createAuction } from "./commands/create.js";
+import { deleteAuction } from "./commands/delete.js";
+import { removeMaster } from "./commands/remove-master.js";
+import { removeSlave } from "./commands/remove-slave.js";
+import { resetAuction } from "./commands/reset.js";
+import { setAdminRole } from "./commands/set-admin-role.js";
+import { handlePlaceBidButton, handlePlaceBidModal, startNextRound } from "./commands/start-next-round.js";
+import { startAuction } from "./commands/start.js";
+import { undoLastRound } from "./commands/undo-last-round.js";
+import { updateSlaveSpecialty } from "./commands/update-slave-specialty.js";
+import { viewParticipants } from "./commands/view-participants.js";
+import { viewStatus } from "./commands/view-status.js";
+import { requireEnvironmentVariable } from "./config.js";
+import { auctions, persistState } from "./database/global.js";
+import { resumePersistedRounds } from "./services/roundCoordinator.js";
+import { isServerAdmin, verifyAuctionAdmin } from "./utils/auth.js";
+import { errorReplyBuilder } from "./utils/discord-utils.js";
 
-const require = createRequire(import.meta.url);
-try {
-    // Optional in cloud runtimes where env vars are injected by the platform.
-    require('dotenv/config');
+type CommandRoute = {
+    access: CommandAccess;
+    mutates: boolean;
+    handler: (interaction: ChatInputCommandInteraction) => Promise<void>;
+};
+
+const commandHandlers = {
+    "set-admin-role": setAdminRole,
+    create: createAuction,
+    delete: deleteAuction,
+    "add-slave": addSlave,
+    "update-slave-specialty": updateSlaveSpecialty,
+    "add-master": addMaster,
+    "remove-slave": removeSlave,
+    "remove-master": removeMaster,
+    start: startAuction,
+    reset: resetAuction,
+    "start-next-round": startNextRound,
+    "cancel-current-round": cancelCurrentRound,
+    "undo-last-round": undoLastRound,
+    "view-status": viewStatus,
+    "view-participants": viewParticipants,
+} as const;
+
+const commandRoutes = new Map<string, CommandRoute>(
+    Object.entries(commandHandlers).map(([name, handler]) => {
+        const spec = getCommandRouteSpec(name);
+        if (!spec) {
+            throw new Error(`Missing command route spec for "${name}".`);
+        }
+        return [name, { access: spec.access, mutates: spec.mutates, handler }];
+    }),
+);
+
+function normalizePriorityInput(value: string): string[] {
+    return value.split(",").map((part) => part.trim().toLowerCase());
 }
-catch {
-    // No-op: continue with process.env as provided by host environment.
+
+function buildPrioritySuggestions(masterTags: string[], typed: string): string[] {
+    if (masterTags.length === 0) return [];
+    const parts = normalizePriorityInput(typed);
+    const completed = parts.slice(0, -1);
+    const partial = parts.at(-1) ?? "";
+    const selected: string[] = [];
+
+    for (const token of completed) {
+        const match = masterTags.find((tag) => tag.toLowerCase() === token && !selected.includes(tag));
+        if (!match) return [];
+        selected.push(match);
+    }
+
+    const remaining = masterTags.filter((tag) => !selected.includes(tag));
+    const matchingNext = remaining.filter((tag) => tag.toLowerCase().startsWith(partial));
+    const candidates = (matchingNext.length > 0 ? matchingNext : remaining).slice(0, 25);
+    return candidates.map((candidate) => {
+        const rest = remaining.filter((tag) => tag !== candidate);
+        return [...selected, candidate, ...rest].join(", ");
+    });
 }
 
-
-// Handle autocompletion interactions
-async function handleAutocompleteInteraction(interaction: AutocompleteInteraction) {
-    if (interaction.commandName !== 'auction') return;
-    // Autocomplete should fail silently when context is invalid.
-    if (!interaction.inGuild() || !interaction.guildId) return;
+async function handleAutocompleteInteraction(interaction: AutocompleteInteraction): Promise<void> {
+    if (interaction.commandName !== "auction" || !interaction.inGuild() || !interaction.guildId) return;
 
     const focused = interaction.options.getFocused(true);
-    const typed = String(focused.value ?? '').toLowerCase();
-
-    if (focused.name === 'auction_name') {
+    const typed = String(focused.value ?? "").toLowerCase();
+    if (focused.name === "auction_name") {
         const subcommand = interaction.options.getSubcommand();
-        const names = (subcommand === 'view-participants' || subcommand === 'delete'
-            ? auctions.listAuctionNames(interaction.guildId)
-            : auctions.listOpenAuctionNames(interaction.guildId))
-            .filter(n => n.toLowerCase().includes(typed));
-
-        await interaction.respond(names.map(n => ({ name: n, value: n })));
+        const names = (
+            subcommand === "view-participants" || subcommand === "delete"
+                ? auctions.listAuctionNames(interaction.guildId)
+                : auctions.listOpenAuctionNames(interaction.guildId)
+        )
+            .filter((name) => name.toLowerCase().includes(typed))
+            .slice(0, 25);
+        await interaction.respond(names.map((name) => ({ name: name.slice(0, 100), value: name.slice(0, 100) })));
         return;
     }
 
-    else if (focused.name === 'priority_order') {
-        // Suggest possible combinations (permutations) of masters' discord tags for the entered auction_name
-        const auctionName = interaction.options.getString('auction_name', false);
-        if (!auctionName) {
-            // Don't suggest anything if auction_name isn't typed yet
-            await interaction.respond([]);
-            return;
-        }
-
-        const auction = auctions.getByName(interaction.guildId, auctionName);
-        if (!auction || !auction.masters.size) {
-            await interaction.respond([]);
-            return;
-        }
-
-        // Get all master usernames
-        const masterTags = Array.from(auction.masters.values()).map(m => m.tag);
-
-        const permutations = getPermutations(masterTags);
-        const orderedStrings = permutations.map(tags => tags.join(', '));
-
-        // Filter out permutations that don't start with what the user has typed so far (case-insensitive and forgiving extra spaces)
-        // Normalize both user input and permutation to ignore extra spaces around commas/names
-        function normalize(s: string): string {
-            return s
-                .split(',')
-                .map(part => part.trim().toLowerCase())
-                .join(', ');
-        }
-
-        const normalizedTyped = normalize(typed);
-
-        const filteredOrderedStrings = orderedStrings.filter(s => {
-            // Check if user has typed anything; if not, offer all
-            if (!normalizedTyped) return true;
-            const normalizedString = normalize(s);
-            return normalizedString.startsWith(normalizedTyped);
-        });
-
-        // Only send a reasonable number of autocomplete options
+    if (focused.name === "priority_order") {
+        const auctionName = interaction.options.getString("auction_name", false);
+        const auction = auctionName ? auctions.getByName(interaction.guildId, auctionName) : undefined;
+        const masterTags = auction ? Array.from(auction.masters.values()).map((master) => master.tag) : [];
+        const suggestions = buildPrioritySuggestions(masterTags, typed);
         await interaction.respond(
-            filteredOrderedStrings.slice(0, 25).map(s => ({ name: s, value: s }))
+            suggestions
+                .filter((suggestion) => suggestion.length <= 100)
+                .map((suggestion) => ({ name: suggestion, value: suggestion })),
         );
-        return;
-      }
+    }
 }
 
+async function authorizeCommand(interaction: ChatInputCommandInteraction, access: CommandAccess): Promise<boolean> {
+    if (access === "public") return true;
+    if (access === "server-admin") {
+        if (isServerAdmin(interaction)) return true;
+        await interaction.reply(
+            errorReplyBuilder({ description: "Only server administrators can run this command.", ephemeral: false }),
+        );
+        return false;
+    }
+    return (await verifyAuctionAdmin(interaction)) === true;
+}
 
-// Handle slash command interactions
-async function handleChatInputInteraction(interaction: ChatInputCommandInteraction) {
-    if (interaction.commandName !== 'auction') return;
-    if (!interaction.inGuild() || !interaction.guildId) {
-        await interaction.reply(errorReplyBuilder({description: 'This command can only be used inside a server.'}));
+async function handleChatInputInteraction(
+    interaction: ChatInputCommandInteraction,
+    route: CommandRoute | undefined,
+): Promise<void> {
+    if (interaction.commandName !== "auction") return;
+    if (!interaction.inGuild() || !interaction.guildId || !interaction.channelId) {
+        await interaction.reply(
+            errorReplyBuilder({ description: "This command can only be used inside a server channel." }),
+        );
         return;
     }
-    if (!interaction.channelId) {
-        await interaction.reply(errorReplyBuilder({description: 'This command can only be used inside a server channel.'}));
+    if (!route) {
+        await interaction.reply(errorReplyBuilder({ description: "Unknown auction command." }));
         return;
     }
-
-    const subcommand = interaction.options.getSubcommand();
-
-    // Enforce auth
-    if (subcommand === 'set-admin-role') {
-        if (!isServerAdmin(interaction)) {
-            await interaction.reply(errorReplyBuilder(
-                { description: 'Only server administrators can run this command.', ephemeral: false }
-            ));
-            return;
-        }
-    }
-    else if (
-        subcommand === 'create' ||
-        subcommand === 'delete' ||
-        subcommand === 'add-slave' ||
-        subcommand === 'add-master' ||
-        subcommand === 'remove-slave' ||
-        subcommand === 'remove-master' ||
-        subcommand === 'start' ||
-        subcommand === 'reset' ||
-        subcommand === 'start-next-round' ||
-        subcommand === 'cancel-current-round' ||
-        subcommand === 'undo-last-round' ||
-        subcommand === 'update-slave-specialty'
-    ) {
-        if (!await verifyAuctionAdmin(interaction)) return;
-    }
-
-
-    if (subcommand === 'set-admin-role') {
-        await setAdminRole(interaction);
-    }
-
-    
-    else if (subcommand === 'create') {
-        await createAuction(interaction);
-    }
-    else if (subcommand === 'delete') {
-        await deleteAuction(interaction);
-    }
-
-    else if (subcommand === 'add-slave') {
-        await addSlave(interaction);
-    }
-
-    else if (subcommand === 'update-slave-specialty') {
-        await updateSlaveSpecialty(interaction);
-    }
-
-    else if (subcommand === 'add-master') {
-        await addMaster(interaction);
-    }
-
-    else if (subcommand === 'remove-slave') {
-        await removeSlave(interaction);
-    }
-
-    else if (subcommand === 'remove-master') {
-        await removeMaster(interaction);
-    }
-
-    else if (subcommand === 'start') {
-        await startAuction(interaction);
-    }
-    else if (subcommand === 'reset') {
-        await resetAuction(interaction);
-    }
-    else if (subcommand === 'start-next-round') {
-        await startNextRoundCommand(interaction);
-    }
-    else if (subcommand === 'cancel-current-round') {
-        await cancelCurrentRound(interaction);
-    }
-    else if (subcommand === 'undo-last-round') {
-        await undoLastRound(interaction);
-    }
-    else if (subcommand === 'view-status') {
-        await viewStatus(interaction);
-    }
-    else if (subcommand === 'view-participants') {
-        await viewParticipants(interaction);
-    }
+    if (!(await authorizeCommand(interaction, route.access))) return;
+    await route.handler(interaction);
 }
 
 async function replyWithUnexpectedError(interaction: Interaction): Promise<void> {
     if (!interaction.isRepliable()) return;
     try {
-        if (interaction.deferred || interaction.replied) {
-            await interaction.followUp(errorReplyBuilder({ description: 'Something went wrong while handling that interaction. Please try again.' }));
-            return;
-        }
-        await interaction.reply(errorReplyBuilder({ description: 'Something went wrong while handling that interaction. Please try again.' }));
-    }
-    catch (replyError) {
-        console.error('[interaction:error-reply-failed]', replyError);
+        const response = errorReplyBuilder({
+            description: "Something went wrong while handling that interaction. Please try again.",
+        });
+        if (interaction.deferred || interaction.replied) await interaction.followUp(response);
+        else await interaction.reply(response);
+    } catch (replyError) {
+        console.error("[interaction:error-reply-failed]", replyError);
     }
 }
 
 async function handleInteractionSafely(interaction: Interaction): Promise<void> {
+    let shouldPersist = false;
     try {
-        let shouldPersist = false;
         if (interaction.isAutocomplete()) {
             await handleAutocompleteInteraction(interaction);
-        }
-        else if (interaction.isChatInputCommand()) {
-            await handleChatInputInteraction(interaction);
-            shouldPersist = true;
-        }
-        else if (interaction.isButton()) {
+        } else if (interaction.isChatInputCommand()) {
+            const route = commandRoutes.get(interaction.options.getSubcommand());
+            shouldPersist = route?.mutates ?? false;
+            await handleChatInputInteraction(interaction, route);
+        } else if (interaction.isButton()) {
             await handlePlaceBidButton(interaction);
-            shouldPersist = true;
+        } else if (interaction.isModalSubmit()) {
+            shouldPersist = await handlePlaceBidModal(interaction);
         }
-        else if (interaction.isModalSubmit()) {
-            await handlePlaceBidModal(interaction);
-            shouldPersist = true;
-        }
-
-        if (shouldPersist) {
-            // Persist after mutating interactions so state survives restarts.
-            persistState();
-        }
-    }
-    catch (error) {
-        console.error('[interaction:unhandled]', error);
+    } catch (error) {
+        console.error("[interaction:unhandled]", error);
         await replyWithUnexpectedError(interaction);
+    } finally {
+        if (shouldPersist) {
+            try {
+                persistState();
+            } catch (error) {
+                console.error("[state:persist-after-interaction]", error);
+            }
+        }
     }
 }
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
-
-client.once(Events.ClientReady, (c) => {
-    console.log(`${c.user.tag} is online!`);
-
-    // Testing setup
-    // const auction = auctions.create(
-    //     '1288936489534754826',
-    //     'test',
-    // );
-    // auctions.addSlave('1288936489534754826', 'test', '284509170412027905', 'deathstar6678', 'Attacker');
-    // auctions.addSlave('1288936489534754826', 'test', '1279092301825704038', 'jpk11.1', 'Base Builder');
-    // auctions.addSlave('1288936489534754826', 'test', '1384661102251737169', 'godman_69', 'Base Builder');
-    // auctions.addSlave('1288936489534754826', 'test', '678342626646163506', 'xanderheij', 'Attacker');
-    // auctions.addMaster('1288936489534754826', 'test', '235648483003072512', 'spyke_x');
-    // auctions.addMaster('1288936489534754826', 'test', '1107882569799847968', 'rival_____');
-
-
-    // auction.channelId = '1478447176605503626';
-    // auction.status = 'LIVE';
-    // auction.rules = {
-    //     startingBudget: 100,
-    //     roundDurationMs: 2 * 60 * 1000,
-    //     maxSlavesPerMaster: Math.ceil(auction.slaves.size / auction.masters.size),
-    //     priorityType: 'fixed',
-    //     startingPriorityOrder: ['235648483003072512', '1107882569799847968'],
-    // };
-    // auction.state = {
-    //     startedAt: Date.now(),
-    //     balances: new Map(Array.from(auction.masters.entries()).map(([id, master]) => [id, auction.rules?.startingBudget ?? 100])),
-    //     purchases: new Map(Array.from(auction.masters.entries()).map(([id, master]) => [id, []])),
-    // };
+client.once(Events.ClientReady, (readyClient) => {
+    console.log(`${readyClient.user.tag} is online!`);
+    resumePersistedRounds(readyClient);
 });
-
-const persistenceInterval = setInterval(() => {
-    persistState();
-}, 5_000);
-persistenceInterval.unref();
-
-client.on(Events.Error, (error) => {
-    console.error('[discord:client-error]', error);
-});
-
-process.on('unhandledRejection', (reason) => {
-    console.error('[process:unhandled-rejection]', reason);
-});
-
-process.on('uncaughtException', (error) => {
-    console.error('[process:uncaught-exception]', error);
-});
-
-process.on('SIGINT', () => {
-    persistState();
-    process.exit(0);
-});
-
-process.on('SIGTERM', () => {
-    persistState();
-    process.exit(0);
-});
-
+client.on(Events.Error, (error) => console.error("[discord:client-error]", error));
 client.on(Events.InteractionCreate, (interaction) => {
     void handleInteractionSafely(interaction);
 });
 
-client.login(process.env.DISCORD_TOKEN);
+let shuttingDown = false;
+function shutdown(exitCode: number, reason: string, error?: unknown): void {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    if (error !== undefined) console.error(reason, error);
+    try {
+        persistState();
+    } catch (persistError) {
+        console.error("[state:persist-on-shutdown]", persistError);
+    }
+    client.destroy();
+    process.exit(exitCode);
+}
+
+process.on("unhandledRejection", (reason) => shutdown(1, "[process:unhandled-rejection]", reason));
+process.on("uncaughtException", (error) => shutdown(1, "[process:uncaught-exception]", error));
+process.on("SIGINT", () => shutdown(0, "[process:sigint]"));
+process.on("SIGTERM", () => shutdown(0, "[process:sigterm]"));
+
+const token = requireEnvironmentVariable("DISCORD_TOKEN");
+void client.login(token).catch((error) => shutdown(1, "[discord:login-failed]", error));

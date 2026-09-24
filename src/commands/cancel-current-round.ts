@@ -1,45 +1,23 @@
 import type { ChatInputCommandInteraction } from "discord.js";
-import { auctions, persistState } from "../database/global.js";
+import { clearActiveRound } from "../domain/auctionLifecycle.js";
 import { errorReplyBuilder, replyBuilder } from "../utils/discord-utils.js";
+import { getAuctionForCommand } from "./auctionCommandGuards.js";
 
 export async function cancelCurrentRound(interaction: ChatInputCommandInteraction) {
     const auctionName = interaction.options.getString("auction_name", true);
-
-    const auction = auctions.getByName(interaction.guildId!, auctionName);
-    if (!auction) {
-        await interaction.reply(errorReplyBuilder({ description: `Auction **${auctionName}** not found.` }));
-        return;
-    }
-
-    if (auction.status === "INIT") {
-        await interaction.reply(errorReplyBuilder({ description: `Auction **${auctionName}** has not started yet.` }));
-        return;
-    }
-
-    if (auction.status === "CLOSED") {
-        await interaction.reply(errorReplyBuilder({ description: `Auction **${auctionName}** is already over.` }));
-        return;
-    }
+    const auction = await getAuctionForCommand(interaction, auctionName, {
+        allowedStatuses: ["LIVE"],
+        requireAuctionChannel: true,
+    });
+    if (!auction) return;
 
     if (!auction.currentRoundState) {
         await interaction.reply(errorReplyBuilder({ description: "There is no active round to cancel." }));
         return;
     }
 
-    if (interaction.channelId !== auction.channelId) {
-        await interaction.reply(errorReplyBuilder({ description: `Please run this command in the <#${auction.channelId}> channel.` }));
-        return;
-    }
-
-    const round = auction.currentRoundState;
-
-    if (round.timeoutHandle) {
-        clearTimeout(round.timeoutHandle);
-        delete round.timeoutHandle;
-    }
-
-    delete auction.currentRoundState;
-    persistState();
+    const round = clearActiveRound(auction);
+    if (!round) return;
 
     if (auction.channelId) {
         try {
@@ -57,21 +35,22 @@ export async function cancelCurrentRound(interaction: ChatInputCommandInteractio
                             embeds: cancelledStatus.embeds!,
                             components: [],
                         });
-                    }
-                    catch (error) {
+                    } catch (error) {
                         console.warn("[auction:cancel-round:edit-status-message]", error);
                     }
                 }
             }
-        }
-        catch (error) {
+        } catch (error) {
             console.warn("[auction:cancel-round:fetch-channel]", error);
         }
     }
 
     console.log(`[auction:cancel-round] auction=${auction.name} nominee=${round.nomineeTag ?? round.nomineeId}`);
-    await interaction.reply(errorReplyBuilder({
-        description: "Ongoing round has been cancelled.",
-        ephemeral: false,
-    }));
+    await interaction.reply(
+        replyBuilder({
+            description: "Ongoing round has been cancelled.",
+            ephemeral: false,
+            color: "blue-400",
+        }),
+    );
 }

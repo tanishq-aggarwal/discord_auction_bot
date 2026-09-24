@@ -1,265 +1,223 @@
-import { createRequire } from 'node:module';
-import { REST, Routes, SlashCommandBuilder } from 'discord.js';
+import "dotenv/config";
+import { REST, Routes, SlashCommandBuilder } from "discord.js";
+import { requireEnvironmentVariable } from "./config.js";
+import { SLAVE_SPECIALTIES } from "./domain/specialties.js";
 
-const require = createRequire(import.meta.url);
-try {
-  // Optional in cloud runtimes where env vars are injected by the platform.
-  require('dotenv/config');
-} catch {
-  // No-op: continue with process.env as provided by host environment.
-}
-
-const token = process.env.DISCORD_TOKEN!;
-const clientId = process.env.CLIENT_ID!;
+const token = requireEnvironmentVariable("DISCORD_TOKEN");
+const clientId = requireEnvironmentVariable("CLIENT_ID");
+const specialtyChoices = SLAVE_SPECIALTIES.map((specialty) => ({ name: specialty, value: specialty }));
 
 const commands = [
-  new SlashCommandBuilder()
-  .setName('auction')
-  .setDescription('Auction commands')
-  .addSubcommand(sub =>
-    sub
-      .setName('set-admin-role')
-      .setDescription('Configure which role can manage auctions in this server')
-      .addRoleOption(opt =>
-        opt.setName('role').setDescription('Pick an existing role from this server').setRequired(true),
-      ),
-  )
-  .addSubcommand(sub =>
-    sub
-      .setName('create')
-      .setDescription('Create a new auction')
-      .addStringOption(opt =>
-        opt.setName('auction_name').setDescription('Name of the auction').setRequired(true),
-      ),
-  )
-  .addSubcommand(sub =>
-    sub
-      .setName('delete')
-      .setDescription('Delete an auction from storage')
-      .addStringOption(opt =>
-        opt.setName('auction_name').setDescription('Auction name').setRequired(true).setAutocomplete(true),
-      ),
-  )
-  .addSubcommand(sub =>
-    sub
-      .setName('add-slave')
-      .setDescription('Add a player to the slave pool')
-      .addStringOption(opt =>
-        opt.setName('auction_name').setDescription('Auction name').setRequired(true).setAutocomplete(true),
-      )
-      .addUserOption(opt =>
-        opt.setName('player').setDescription('Select a user to enslave').setRequired(true),
-      )
-      .addStringOption(opt =>
-        opt.setName('specialty').setDescription('Specify what this slave does best').setRequired(true).setChoices([
-          { name: 'Base Builder', value: 'Base Builder' },
-          { name: 'Attacker', value: 'Attacker' },
-          { name: 'All Rounder', value: 'All Rounder' },
-          { name: 'Water Boy', value: 'Water Boy' },
-        ]),
-      ),
-  )
-  .addSubcommand(sub =>
-    sub
-      .setName('update-slave-specialty')
-      .setDescription('Update the specialty of a slave')
-      .addUserOption(opt =>
-        opt.setName('slave').setDescription('Select the slave').setRequired(true),
-      )
-      .addStringOption(opt =>
-        opt.setName('specialty').setDescription('Specify what this slave does best').setRequired(true).setChoices([
-          { name: 'Base Builder', value: 'Base Builder' },
-          { name: 'Attacker', value: 'Attacker' },
-          { name: 'All Rounder', value: 'All Rounder' },
-          { name: 'Water Boy', value: 'Water Boy' },
-        ]),
-      ),
-  )
-  .addSubcommand(sub =>
-    sub
-      .setName('add-master')
-      .setDescription('Add a player to the bidder pool')
-      .addStringOption(opt =>
-        opt
-          .setName('auction_name')
-          .setDescription('Auction name')
-          .setRequired(true)
-          .setAutocomplete(true),
-      )
-      .addUserOption(opt =>
-        opt
-          .setName('player')
-          .setDescription('Select a user')
-          .setRequired(true),
-      ),
-  )
-  .addSubcommand(sub =>
-    sub
-      .setName('remove-slave')
-      .setDescription('Remove a player from the slave pool')
-      .addStringOption(opt =>
-        opt.setName('auction_name').setDescription('Auction name').setRequired(true).setAutocomplete(true),
-      )
-      .addUserOption(opt =>
-        opt.setName('slave').setDescription('Free a slave').setRequired(true),
-      ),
-  )
-  .addSubcommand(sub =>
-    sub
-      .setName('remove-master')
-      .setDescription('Remove a player from the bidder pool')
-      .addStringOption(opt =>
-        opt.setName('auction_name').setDescription('Auction name').setRequired(true).setAutocomplete(true),
-      )
-      .addUserOption(opt =>
-        opt.setName('master').setDescription('Pick a master').setRequired(true),
-      ),
-  )
-  .addSubcommand(sub =>
-    sub
-      .setName('start')
-      .setDescription('Start the auction')
-      .addStringOption(opt =>
-        opt
-          .setName('auction_name')
-          .setDescription('Auction name')
-          .setRequired(true)
-          .setAutocomplete(true)
-      )
-      .addIntegerOption(opt =>
-        opt
-          .setName('starting_budget')
-          .setDescription('Starting budget for each master')
-          .setRequired(true)
-          .setMinValue(1)
-          .setMaxValue(1000)
-      )
-      .addStringOption(opt =>
-        opt
-          .setName('priority_order')
-          .setDescription("A comma-separated list of Discord user IDs, representing the priority order for breaking ties")
-          .setRequired(true)
-          .setAutocomplete(true)
-      )
-      .addStringOption(opt =>
-        opt
-          .setName('priority_type')
-          .setDescription('Type of priority order')
-          .setRequired(false)
-          .setChoices([
-            { name: 'Fixed (default)', value: 'fixed' },
-            { name: 'Rotating', value: 'rotating' },
-          ])
-      )
-  )
-  .addSubcommand(sub =>
-    sub
-      .setName('reset')
-      .setDescription('Reset an auction to its initial state (all purchases will be reverted)')
-      .addStringOption(opt =>
-        opt
-          .setName('auction_name')
-          .setDescription('Auction name')
-          .setRequired(true)
-          .setAutocomplete(true),
-      ),
-  )
-  .addSubcommand(sub =>
-    sub
-      .setName('start-next-round')
-      .setDescription('Start the next round of an auction')
-      .addStringOption(opt =>
-        opt
-          .setName('auction_name')
-          .setDescription('Auction name')
-          .setRequired(true)
-          .setAutocomplete(true)
-      )
-      .addUserOption(opt =>
-        opt
-          .setName('nominated_slave')
-          .setDescription('Pick a slave to be nominated for this round')
-          .setRequired(true)
-      )
-      .addUserOption(opt =>
-        opt
-          .setName('nominated_by')
-          .setDescription('Pick the master who nominated this slave')
-          .setRequired(true)
-      )
-  )
-  .addSubcommand(sub =>
-    sub
-      .setName('cancel-current-round')
-      .setDescription('Interrupt the currently active round')
-      .addStringOption(opt =>
-        opt
-          .setName('auction_name')
-          .setDescription('Auction name')
-          .setRequired(true)
-          .setAutocomplete(true)
-      )
-  )
-  .addSubcommand(sub =>
-    sub
-      .setName('undo-last-round')
-      .setDescription('Undo all changes from the previous completed round')
-      .addStringOption(opt =>
-        opt
-          .setName('auction_name')
-          .setDescription('Auction name')
-          .setRequired(true)
-          .setAutocomplete(true)
-      )
-  )
-  .addSubcommand(sub =>
-    sub
-      .setName('view-status')
-      .setDescription('View the current auction status summary')
-      .addStringOption(opt =>
-        opt
-          .setName('auction_name')
-          .setDescription('Auction name')
-          .setRequired(true)
-          .setAutocomplete(true)
-      )
-  )
-  .addSubcommand(sub =>
-    sub
-      .setName('view-participants')
-      .setDescription('View the masters and slaves configured for an auction')
-      .addStringOption(opt =>
-        opt
-          .setName('auction_name')
-          .setDescription('Auction name')
-          .setRequired(true)
-          .setAutocomplete(true)
-      )
-  )
-  .toJSON()
+    new SlashCommandBuilder()
+        .setName("auction")
+        .setDescription("Auction commands")
+        .addSubcommand((sub) =>
+            sub
+                .setName("set-admin-role")
+                .setDescription("Configure which role can manage auctions in this server")
+                .addRoleOption((opt) =>
+                    opt.setName("role").setDescription("Pick an existing role from this server").setRequired(true),
+                ),
+        )
+        .addSubcommand((sub) =>
+            sub
+                .setName("create")
+                .setDescription("Create a new auction")
+                .addStringOption((opt) =>
+                    opt.setName("auction_name").setDescription("Name of the auction").setRequired(true),
+                ),
+        )
+        .addSubcommand((sub) =>
+            sub
+                .setName("delete")
+                .setDescription("Delete an auction from storage")
+                .addStringOption((opt) =>
+                    opt.setName("auction_name").setDescription("Auction name").setRequired(true).setAutocomplete(true),
+                ),
+        )
+        .addSubcommand((sub) =>
+            sub
+                .setName("add-slave")
+                .setDescription("Add a player to the slave pool")
+                .addStringOption((opt) =>
+                    opt.setName("auction_name").setDescription("Auction name").setRequired(true).setAutocomplete(true),
+                )
+                .addUserOption((opt) =>
+                    opt.setName("player").setDescription("Select a user to enslave").setRequired(true),
+                )
+                .addStringOption((opt) =>
+                    opt
+                        .setName("specialty")
+                        .setDescription("Specify what this slave does best")
+                        .setRequired(true)
+                        .setChoices(specialtyChoices),
+                ),
+        )
+        .addSubcommand((sub) =>
+            sub
+                .setName("update-slave-specialty")
+                .setDescription("Update the specialty of a slave")
+                .addUserOption((opt) => opt.setName("slave").setDescription("Select the slave").setRequired(true))
+                .addStringOption((opt) =>
+                    opt
+                        .setName("specialty")
+                        .setDescription("Specify what this slave does best in every auction on this server")
+                        .setRequired(true)
+                        .setChoices(specialtyChoices),
+                ),
+        )
+        .addSubcommand((sub) =>
+            sub
+                .setName("add-master")
+                .setDescription("Add a player to the bidder pool")
+                .addStringOption((opt) =>
+                    opt.setName("auction_name").setDescription("Auction name").setRequired(true).setAutocomplete(true),
+                )
+                .addUserOption((opt) => opt.setName("player").setDescription("Select a user").setRequired(true)),
+        )
+        .addSubcommand((sub) =>
+            sub
+                .setName("remove-slave")
+                .setDescription("Remove a player from the slave pool")
+                .addStringOption((opt) =>
+                    opt.setName("auction_name").setDescription("Auction name").setRequired(true).setAutocomplete(true),
+                )
+                .addUserOption((opt) => opt.setName("slave").setDescription("Free a slave").setRequired(true)),
+        )
+        .addSubcommand((sub) =>
+            sub
+                .setName("remove-master")
+                .setDescription("Remove a player from the bidder pool")
+                .addStringOption((opt) =>
+                    opt.setName("auction_name").setDescription("Auction name").setRequired(true).setAutocomplete(true),
+                )
+                .addUserOption((opt) => opt.setName("master").setDescription("Pick a master").setRequired(true)),
+        )
+        .addSubcommand((sub) =>
+            sub
+                .setName("start")
+                .setDescription("Start the auction")
+                .addStringOption((opt) =>
+                    opt.setName("auction_name").setDescription("Auction name").setRequired(true).setAutocomplete(true),
+                )
+                .addIntegerOption((opt) =>
+                    opt
+                        .setName("starting_budget")
+                        .setDescription("Starting budget for each master")
+                        .setRequired(true)
+                        .setMinValue(1)
+                        .setMaxValue(1000),
+                )
+                .addStringOption((opt) =>
+                    opt
+                        .setName("priority_order")
+                        .setDescription(
+                            "A comma-separated list of Discord user IDs, representing the priority order for breaking ties",
+                        )
+                        .setRequired(true)
+                        .setAutocomplete(true),
+                )
+                .addStringOption((opt) =>
+                    opt
+                        .setName("priority_type")
+                        .setDescription("Type of priority order")
+                        .setRequired(false)
+                        .setChoices([
+                            { name: "Fixed (default)", value: "fixed" },
+                            { name: "Rotating", value: "rotating" },
+                        ]),
+                ),
+        )
+        .addSubcommand((sub) =>
+            sub
+                .setName("reset")
+                .setDescription("Reset an auction to its initial state (all purchases will be reverted)")
+                .addStringOption((opt) =>
+                    opt.setName("auction_name").setDescription("Auction name").setRequired(true).setAutocomplete(true),
+                ),
+        )
+        .addSubcommand((sub) =>
+            sub
+                .setName("start-next-round")
+                .setDescription("Start the next round of an auction")
+                .addStringOption((opt) =>
+                    opt.setName("auction_name").setDescription("Auction name").setRequired(true).setAutocomplete(true),
+                )
+                .addUserOption((opt) =>
+                    opt
+                        .setName("nominated_slave")
+                        .setDescription("Pick a slave to be nominated for this round")
+                        .setRequired(true),
+                )
+                .addUserOption((opt) =>
+                    opt
+                        .setName("nominated_by")
+                        .setDescription("Pick the master who nominated this slave")
+                        .setRequired(true),
+                ),
+        )
+        .addSubcommand((sub) =>
+            sub
+                .setName("cancel-current-round")
+                .setDescription("Interrupt the currently active round")
+                .addStringOption((opt) =>
+                    opt.setName("auction_name").setDescription("Auction name").setRequired(true).setAutocomplete(true),
+                ),
+        )
+        .addSubcommand((sub) =>
+            sub
+                .setName("undo-last-round")
+                .setDescription("Undo all changes from the previous completed round")
+                .addStringOption((opt) =>
+                    opt.setName("auction_name").setDescription("Auction name").setRequired(true).setAutocomplete(true),
+                ),
+        )
+        .addSubcommand((sub) =>
+            sub
+                .setName("view-status")
+                .setDescription("View the current auction status summary")
+                .addStringOption((opt) =>
+                    opt.setName("auction_name").setDescription("Auction name").setRequired(true).setAutocomplete(true),
+                ),
+        )
+        .addSubcommand((sub) =>
+            sub
+                .setName("view-participants")
+                .setDescription("View the masters and slaves configured for an auction")
+                .addStringOption((opt) =>
+                    opt.setName("auction_name").setDescription("Auction name").setRequired(true).setAutocomplete(true),
+                ),
+        )
+        .toJSON(),
 ];
 
-const rest = new REST({ version: '10' }).setToken(token);
+const rest = new REST({ version: "10" }).setToken(token);
 
 (async () => {
-  const guilds = (await rest.get(Routes.userGuilds())) as Array<{ id: string; name: string }>;
+    const configuredGuildId = process.env.GUILD_ID?.trim();
+    const guilds = configuredGuildId
+        ? [{ id: configuredGuildId, name: configuredGuildId }]
+        : ((await rest.get(Routes.userGuilds())) as Array<{ id: string; name: string }>);
 
-  if (guilds.length === 0) {
-    console.log('Bot is not in any guilds. No commands were registered.');
-    return;
-  }
-
-  let successCount = 0;
-
-  for (const guild of guilds) {
-    try {
-      await rest.put(Routes.applicationGuildCommands(clientId, guild.id), { body: commands });
-      successCount += 1;
-      console.log(`Registered /auction commands in "${guild.name}" (${guild.id}).`);
-    } catch (error) {
-      console.error(`Failed to register commands in "${guild.name}" (${guild.id}).`, error);
+    if (guilds.length === 0) {
+        console.log("Bot is not in any guilds. No commands were registered.");
+        return;
     }
-  }
 
-  console.log(`Finished command deployment. Registered in ${successCount}/${guilds.length} guild(s).`);
-})();
+    let successCount = 0;
+
+    for (const guild of guilds) {
+        try {
+            await rest.put(Routes.applicationGuildCommands(clientId, guild.id), { body: commands });
+            successCount += 1;
+            console.log(`Registered /auction commands in "${guild.name}" (${guild.id}).`);
+        } catch (error) {
+            console.error(`Failed to register commands in "${guild.name}" (${guild.id}).`, error);
+        }
+    }
+
+    console.log(`Finished command deployment. Registered in ${successCount}/${guilds.length} guild(s).`);
+})().catch((error) => {
+    console.error("Command deployment failed.", error);
+    process.exitCode = 1;
+});

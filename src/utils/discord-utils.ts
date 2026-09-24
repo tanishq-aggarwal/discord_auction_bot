@@ -1,4 +1,4 @@
-import { EmbedBuilder, MessageFlags, type ColorResolvable, type InteractionReplyOptions } from "discord.js";
+import { EmbedBuilder, MessageFlags, type InteractionReplyOptions } from "discord.js";
 import { msToS, type milliseconds } from "./common.js";
 
 /**
@@ -15,13 +15,15 @@ export function getRelativeDiscordTimestamp(forTimestamp: milliseconds): string 
  * @param message - The error message to display.
  * @returns An InteractionReplyOptions object with the error embed and ephemeral flag.
  */
-export function errorReplyBuilder({ description, ephemeral = true }: {
-    description: string,
-    ephemeral?: boolean,
+export function errorReplyBuilder({
+    description,
+    ephemeral = true,
+}: {
+    description: string;
+    ephemeral?: boolean;
 }): InteractionReplyOptions {
-    return replyBuilder({ description, ephemeral, color: 'red-500' });
+    return replyBuilder({ description, ephemeral, color: "red-500" });
 }
-
 
 type EmbedAuthor = {
     name: string;
@@ -29,24 +31,33 @@ type EmbedAuthor = {
 };
 
 export const colorsMap = {
-    'red-500': 0xef4444,
-    'blue-400': 0x60a5fa,
-    'green-500': 0x22c55e,
-    'violet-500': 0x8b5cf6,
-    'yellow-400': 0xfacc15,
-    'pink-500': 0xec4899
+    "red-500": 0xef4444,
+    "blue-400": 0x60a5fa,
+    "green-500": 0x22c55e,
+    "violet-500": 0x8b5cf6,
+    "yellow-400": 0xfacc15,
 };
 
-export function replyBuilder({ plaintextMessage, description, ephemeral = false, title, author, thumbnailURL, fields, footer, color = 'blue-400' }: {
-    plaintextMessage?: string,
-    description?: string,
-    author?: EmbedAuthor,
-    thumbnailURL?: string,
-    title?: string,
-    fields?: Record<string, string>,
-    footer?: string,
-    ephemeral?: boolean,
-    color?: keyof typeof colorsMap
+export function replyBuilder({
+    plaintextMessage,
+    description,
+    ephemeral = false,
+    title,
+    author,
+    thumbnailURL,
+    fields,
+    footer,
+    color = "blue-400",
+}: {
+    plaintextMessage?: string;
+    description?: string;
+    author?: EmbedAuthor;
+    thumbnailURL?: string;
+    title?: string;
+    fields?: Record<string, string>;
+    footer?: string;
+    ephemeral?: boolean;
+    color?: keyof typeof colorsMap;
 }): InteractionReplyOptions {
     const embed = new EmbedBuilder().setColor(colorsMap[color]);
     if (description) {
