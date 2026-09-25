@@ -2,6 +2,7 @@ import type { ChatInputCommandInteraction } from "discord.js";
 import type { Auction } from "../database/auctionStore.js";
 import { auctions, persistState } from "../database/global.js";
 import { initializeAuction } from "../domain/auctionLifecycle.js";
+import { getNextNominatorId } from "../domain/roundRules.js";
 import { minsToMs, sleep } from "../utils/common.js";
 import { errorReplyBuilder, replyBuilder } from "../utils/discord-utils.js";
 
@@ -32,7 +33,7 @@ async function sendAuctionIntroduction(
                 description:
                     `- Each master will start with **${auction.rules?.startingBudget}🪙**` +
                     `\n- Each master can acquire a maximum of **${auction.rules?.maxSlavesPerMaster}** slaves.` +
-                    "\n- An auction admin selects the nominating master each round. That master must bid at least 1🪙 on the nominated slave." +
+                    "\n- Masters nominate in the starting order. Finished masters are skipped. The nominating master must bid at least 1🪙." +
                     "\n- Masters must hold **at least** 1🪙 for each slave they are yet to acquire." +
                     `\n- Each round can last a maximum of **${Math.round((auction.rules?.roundDurationMs ?? 0) / 60_000)}** minutes. Missing bids are submitted automatically at the minimum amount.` +
                     `\n- ${auction.rules?.priorityType === "fixed" ? "Ties are resolved using the configured ranking." : "Tie-breaking priority rotates after each completed round."}` +
@@ -65,6 +66,17 @@ async function sendAuctionIntroduction(
                 color: "violet-500",
             }),
         );
+
+        const firstNominatorId = getNextNominatorId(auction);
+        if (firstNominatorId) {
+            await sleep(5000);
+            await interaction.followUp(
+                replyBuilder({
+                    description: `The first slave will be nominated by <@${firstNominatorId}>.`,
+                    color: "blue-400",
+                }),
+            );
+        }
     } catch (error) {
         console.warn("[auction:start:introduction]", error);
     }
@@ -153,8 +165,12 @@ export async function startAuction(interaction: ChatInputCommandInteraction): Pr
     });
     persistState();
     console.log(`[auction:start] auction=${auction.name} rules=${JSON.stringify(auction.rules)}`);
-    await interaction.reply(
-        replyBuilder({ description: `Auction **${auction.name}** will begin shortly! Meanwhile...` }),
-    );
+    await interaction.reply({
+        ...replyBuilder({
+            plaintextMessage: startingPriorityOrder.map((masterId) => `<@${masterId}>`).join(" "),
+            description: `Auction **${auction.name}** will begin shortly! Meanwhile...`,
+        }),
+        allowedMentions: { users: startingPriorityOrder },
+    });
     void sendAuctionIntroduction(interaction, auction, startingPriorityOrder);
 }

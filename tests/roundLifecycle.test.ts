@@ -11,7 +11,13 @@ import {
     resetAuctionState,
     undoLastRoundState,
 } from "../src/domain/auctionLifecycle.js";
-import { computeMaxBidAllowed, getPriorityOrderForNextRound, getRoundWinner } from "../src/domain/roundRules.js";
+import {
+    computeMaxBidAllowed,
+    getNextNominatorId,
+    getPriorityOrderForNextRound,
+    getRoundWinner,
+    getVisiblePriorityOrder,
+} from "../src/domain/roundRules.js";
 
 function createAuction(): Auction {
     const auction: Auction = {
@@ -60,12 +66,133 @@ test("winner selection resolves ties with the round priority", () => {
     assert.deepEqual(getRoundWinner(round), { winnerId: "master-a", winningBid: 4 });
 });
 
+test("visible priority order omits masters who have finished purchasing", () => {
+    const auction = createAuction();
+    const round = beginRound(auction, {
+        nomineeId: "slave-b",
+        nominatedById: "master-b",
+        startedAt: 3,
+    });
+    auction.state!.purchases.get("master-a")!.push("slave-a", "slave-c");
+
+    assert.deepEqual(round.priorityOrder, ["master-a", "master-b"]);
+    assert.deepEqual(getVisiblePriorityOrder(auction, round.priorityOrder), ["master-b"]);
+});
+
 test("reserve math leaves one coin for every future slot", () => {
     const auction = createAuction();
     assert.equal(computeMaxBidAllowed(auction, "master-a"), 9);
     auction.state!.purchases.get("master-a")!.push("slave-a");
     auction.state!.balances.set("master-a", 4);
     assert.equal(computeMaxBidAllowed(auction, "master-a"), 4);
+});
+
+test("nomination order skips finished masters and does not repeat while others remain", () => {
+    const auction: Auction = {
+        id: randomUUID(),
+        guildId: "guild",
+        channelId: null,
+        name: "nominate",
+        status: "INIT",
+        createdAt: 1,
+        masters: new Map([
+            ["master-a", { id: "master-a", tag: "a" }],
+            ["master-b", { id: "master-b", tag: "b" }],
+            ["master-c", { id: "master-c", tag: "c" }],
+            ["master-d", { id: "master-d", tag: "d" }],
+        ]),
+        slaves: new Map([
+            ["slave-a", { id: "slave-a", tag: "sa", specialty: "Attacker" }],
+            ["slave-b", { id: "slave-b", tag: "sb", specialty: "Base Builder" }],
+            ["slave-c", { id: "slave-c", tag: "sc", specialty: "All Rounder" }],
+            ["slave-d", { id: "slave-d", tag: "sd", specialty: "Water Boy" }],
+            ["slave-e", { id: "slave-e", tag: "se", specialty: "Attacker" }],
+            ["slave-f", { id: "slave-f", tag: "sf", specialty: "Base Builder" }],
+        ]),
+    };
+    initializeAuction(auction, {
+        channelId: "channel",
+        startingBudget: 10,
+        roundDurationMs: 120_000,
+        maxSlavesPerMaster: 2,
+        priorityType: "fixed",
+        startingPriorityOrder: ["master-a", "master-b", "master-c", "master-d"],
+        startedAt: 2,
+    });
+
+    assert.equal(getNextNominatorId(auction), "master-a");
+    assert.equal(getNextNominatorId(auction, "master-a"), "master-b");
+
+    auction.state!.purchases.set("master-b", ["slave-a", "slave-b"]);
+    assert.equal(getNextNominatorId(auction, "master-a"), "master-c");
+    assert.equal(getNextNominatorId(auction, "master-c"), "master-d");
+    assert.notEqual(getNextNominatorId(auction, "master-c"), "master-c");
+
+    auction.state!.purchases.set("master-d", ["slave-c", "slave-d"]);
+    assert.equal(getNextNominatorId(auction, "master-c"), "master-a");
+});
+
+test("rotating priority keeps advancing after masters finish purchasing", () => {
+    const auction: Auction = {
+        id: randomUUID(),
+        guildId: "guild",
+        channelId: null,
+        name: "dropout",
+        status: "INIT",
+        createdAt: 1,
+        masters: new Map([
+            ["master-a", { id: "master-a", tag: "a" }],
+            ["master-b", { id: "master-b", tag: "b" }],
+            ["master-c", { id: "master-c", tag: "c" }],
+            ["master-d", { id: "master-d", tag: "d" }],
+        ]),
+        slaves: new Map([
+            ["slave-a", { id: "slave-a", tag: "sa", specialty: "Attacker" }],
+            ["slave-b", { id: "slave-b", tag: "sb", specialty: "Base Builder" }],
+            ["slave-c", { id: "slave-c", tag: "sc", specialty: "All Rounder" }],
+            ["slave-d", { id: "slave-d", tag: "sd", specialty: "Water Boy" }],
+            ["slave-e", { id: "slave-e", tag: "se", specialty: "Attacker" }],
+            ["slave-f", { id: "slave-f", tag: "sf", specialty: "Base Builder" }],
+        ]),
+    };
+    initializeAuction(auction, {
+        channelId: "channel",
+        startingBudget: 10,
+        roundDurationMs: 120_000,
+        maxSlavesPerMaster: 2,
+        priorityType: "rotating",
+        startingPriorityOrder: ["master-a", "master-b", "master-c", "master-d"],
+        startedAt: 2,
+    });
+    auction.state!.purchases.set("master-a", ["slave-a", "slave-b"]);
+    auction.state!.purchases.set("master-b", ["slave-c", "slave-d"]);
+    auction.lastRoundState = {
+        nomineeId: "slave-d",
+        nominatedById: "master-b",
+        startedAt: 3,
+        deadline: 4,
+        priorityOrder: ["master-a", "master-b", "master-c", "master-d"],
+        bids: new Map(),
+    };
+
+    const nextRound = beginRound(auction, {
+        nomineeId: "slave-e",
+        nominatedById: "master-c",
+        startedAt: 5,
+    });
+    assert.deepEqual(nextRound.priorityOrder, ["master-c", "master-d", "master-b", "master-a"]);
+    assert.deepEqual(getVisiblePriorityOrder(auction, nextRound.priorityOrder), ["master-c", "master-d"]);
+
+    addBid(nextRound, "master-c", 2);
+    addBid(nextRound, "master-d", 1);
+    finalizeRoundState(auction, nextRound);
+
+    const followingRound = beginRound(auction, {
+        nomineeId: "slave-f",
+        nominatedById: "master-d",
+        startedAt: 6,
+    });
+    assert.deepEqual(getVisiblePriorityOrder(auction, followingRound.priorityOrder), ["master-d", "master-c"]);
 });
 
 test("undo restores the tie priority of the undone rotating round", () => {

@@ -2,11 +2,12 @@ import { EmbedBuilder, type Client } from "discord.js";
 import type { Auction, RoundState } from "../database/auctionStore.js";
 import { auctions, persistState } from "../database/global.js";
 import { finalizeRoundState } from "../domain/auctionLifecycle.js";
-import { areAllBidsReceived, autoSubmitMissingBids } from "../domain/roundRules.js";
+import { areAllBidsReceived, autoSubmitMissingBids, getNextNominatorId } from "../domain/roundRules.js";
 import {
     BID_REVEAL_DELAY_MS,
     buildAllBidsReceivedEmbed,
     buildBiddingRoundEmbed,
+    buildNextNominatorEmbed,
     buildRoundRevealEmbed,
     createRoundActionRow,
 } from "../presentation/roundMessages.js";
@@ -98,16 +99,27 @@ export async function finalizeRound(
             } catch (error) {
                 console.warn("[auction:round-finalize:no-winner-message]", error);
             }
-            return;
+        } else {
+            try {
+                await channel.send({
+                    embeds: [buildRoundRevealEmbed(auction, round, winner.winnerId, winner.winningBid)],
+                    content: `<@${round.nomineeId}>`,
+                });
+            } catch (error) {
+                console.warn("[auction:round-finalize:reveal-message]", error);
+            }
         }
 
-        try {
-            await channel.send({
-                embeds: [buildRoundRevealEmbed(auction, round, winner.winnerId, winner.winningBid)],
-                content: `<@${round.nomineeId}>`,
-            });
-        } catch (error) {
-            console.warn("[auction:round-finalize:reveal-message]", error);
+        if (auction.status !== "CLOSED") {
+            const nextNominatorId = getNextNominatorId(auction, round.nominatedById);
+            if (nextNominatorId) {
+                await sleep(3000);
+                try {
+                    await channel.send({ embeds: [buildNextNominatorEmbed(nextNominatorId)] });
+                } catch (error) {
+                    console.warn("[auction:round-finalize:next-nominator-message]", error);
+                }
+            }
         }
 
         if (auction.status === "CLOSED") {

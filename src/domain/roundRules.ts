@@ -74,13 +74,53 @@ export function rotatePriorityOrder(priorityOrder: Master["id"][]): Master["id"]
     return priorityOrder.slice(1).concat(priorityOrder[0]!);
 }
 
+export function compactInactiveMasters(auction: Auction, priorityOrder: Master["id"][]): Master["id"][] {
+    const active: Master["id"][] = [];
+    const inactive: Master["id"][] = [];
+    for (const masterId of priorityOrder) {
+        if (getRemainingSlots(auction, masterId) > 0) active.push(masterId);
+        else inactive.push(masterId);
+    }
+    return active.concat(inactive);
+}
+
 export function getPriorityOrderForNextRound(auction: Auction): Master["id"][] {
     if (!auction.rules) return [];
-    if (auction.nextRoundPriorityOrder) return [...auction.nextRoundPriorityOrder];
-    if (auction.rules.priorityType === "fixed" || !auction.lastRoundState) {
-        return [...auction.rules.startingPriorityOrder];
+
+    let nextOrder: Master["id"][];
+    if (auction.nextRoundPriorityOrder) {
+        nextOrder = [...auction.nextRoundPriorityOrder];
+    } else if (auction.rules.priorityType === "fixed" || !auction.lastRoundState) {
+        nextOrder = [...auction.rules.startingPriorityOrder];
+    } else {
+        nextOrder = rotatePriorityOrder(auction.lastRoundState.priorityOrder);
     }
-    return rotatePriorityOrder(auction.lastRoundState.priorityOrder);
+
+    return auction.rules.priorityType === "rotating" ? compactInactiveMasters(auction, nextOrder) : nextOrder;
+}
+
+export function getVisiblePriorityOrder(auction: Auction, priorityOrder: Master["id"][]): Master["id"][] {
+    return priorityOrder.filter((masterId) => getRemainingSlots(auction, masterId) > 0);
+}
+
+export function getNextNominatorId(auction: Auction, currentNominatorId?: Master["id"]): Master["id"] | null {
+    const order = auction.rules?.startingPriorityOrder ?? [];
+    const eligible = order.filter((masterId) => getRemainingSlots(auction, masterId) > 0);
+    if (eligible.length === 0) return null;
+    if (eligible.length === 1) return eligible[0]!;
+    if (!currentNominatorId) return eligible[0]!;
+
+    const currentIndex = order.indexOf(currentNominatorId);
+    const startIndex = currentIndex === -1 ? -1 : currentIndex;
+    for (let offset = 1; offset <= order.length; offset += 1) {
+        const candidateId = order[(startIndex + offset + order.length) % order.length];
+        if (!candidateId) continue;
+        if (candidateId !== currentNominatorId && getRemainingSlots(auction, candidateId) > 0) {
+            return candidateId;
+        }
+    }
+
+    return eligible.find((masterId) => masterId !== currentNominatorId) ?? eligible[0]!;
 }
 
 export function isAuctionSoldOut(auction: Auction): boolean {

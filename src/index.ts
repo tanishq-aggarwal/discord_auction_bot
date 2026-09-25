@@ -97,7 +97,7 @@ async function handleAutocompleteInteraction(interaction: AutocompleteInteractio
     if (focused.name === "auction_name") {
         const subcommand = interaction.options.getSubcommand();
         const names = (
-            subcommand === "view-participants" || subcommand === "delete"
+            subcommand === "view-participants" || subcommand === "view-status" || subcommand === "delete"
                 ? auctions.listAuctionNames(interaction.guildId)
                 : auctions.listOpenAuctionNames(interaction.guildId)
         )

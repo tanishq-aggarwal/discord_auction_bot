@@ -5,6 +5,7 @@ import {
     computeMaxBidAllowed,
     getEligibleMasterIdsForRound,
     getRemainingSlots,
+    getVisiblePriorityOrder,
 } from "../domain/roundRules.js";
 import { auctionCustomIds } from "../interactions/auctionCustomIds.js";
 import { colorsMap, getRelativeDiscordTimestamp } from "../utils/discord-utils.js";
@@ -48,6 +49,12 @@ export function createOverviewActionRow(auctionId: string): ActionRowBuilder<But
             .setLabel("Place bid")
             .setStyle(ButtonStyle.Success),
     );
+}
+
+export function buildNextNominatorEmbed(masterId: string): EmbedBuilder {
+    return new EmbedBuilder()
+        .setColor(colorsMap["blue-400"])
+        .setDescription(`The next slave will be nominated by <@${masterId}>.`);
 }
 
 export function buildAllBidsReceivedEmbed(round: RoundState): EmbedBuilder {
@@ -101,6 +108,10 @@ export function buildBiddingRoundEmbed(auction: Auction, round: RoundState): Emb
     const nominee = auction.slaves.get(round.nomineeId);
     const eligibleMasterIds = getEligibleMasterIdsForRound(auction, round);
     const bidsCount = eligibleMasterIds.filter((masterId) => round.bids.has(masterId)).length;
+    const visiblePriorityOrder = getVisiblePriorityOrder(auction, round.priorityOrder);
+    const priorityOrderText = visiblePriorityOrder.length
+        ? visiblePriorityOrder.map((masterId) => `<@${masterId}>`).join(" > ")
+        : "_No remaining bidders_";
 
     return new EmbedBuilder()
         .setColor(colorsMap["green-500"])
@@ -110,8 +121,11 @@ export function buildBiddingRoundEmbed(auction: Auction, round: RoundState): Emb
         )
         .setDescription(
             `\n\nBidding has been opened for <@${round.nomineeId}>!` +
+                (round.nominatedById
+                    ? `\nNominated by <@${round.nominatedById}>`
+                    : "") +
                 `\nEnds ${getRelativeDiscordTimestamp(round.deadline)}` +
-                `\n\n\n**Priority Order For Resolving Ties**\n${round.priorityOrder.map((masterId) => `<@${masterId}>`).join(" > ")}` +
+                `\n\n\n**Priority Order For Resolving Ties**\n${priorityOrderText}` +
                 `\n\n\n**Bidding Progress** (${bidsCount}/${eligibleMasterIds.length})\n` +
                 buildBidProgressString(auction, round),
         )
