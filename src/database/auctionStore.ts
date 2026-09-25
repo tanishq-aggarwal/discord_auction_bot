@@ -1,5 +1,6 @@
 import { randomUUID, type UUID } from "node:crypto";
 import { clearActiveRound } from "../domain/auctionLifecycle.js";
+import { getNextNominatorId } from "../domain/roundRules.js";
 import { isSlaveSpecialty, type SlaveSpecialty } from "../domain/specialties.js";
 import type { epochMilliseconds, milliseconds } from "../utils/common.js";
 
@@ -20,11 +21,14 @@ export type RoundState = {
     timeoutHandle?: NodeJS.Timeout;
 };
 
+export type NominationType = "manual" | "random";
+
 export type AuctionRules = {
     startingBudget: number;
     roundDurationMs: milliseconds;
     maxSlavesPerMaster: number;
     priorityType: "fixed" | "rotating";
+    nominationType: NominationType;
     startingPriorityOrder: Master["id"][];
 };
 
@@ -55,6 +59,8 @@ export type Auction = {
     lastRoundState?: RoundState;
     /** Used to replay the same tie priority after a cancelled or undone round. */
     nextRoundPriorityOrder?: Master["id"][];
+    /** Next master in starting-order nomination, used for announcements and random obligation. */
+    nextNominatorId?: Master["id"];
 };
 
 export type DiscordUser = {
@@ -419,6 +425,9 @@ export class AuctionStore {
                 if (auction.nextRoundPriorityOrder) {
                     serializedAuction.nextRoundPriorityOrder = [...auction.nextRoundPriorityOrder];
                 }
+                if (auction.nextNominatorId) {
+                    serializedAuction.nextNominatorId = auction.nextNominatorId;
+                }
                 serialized[guildId][auctionName] = serializedAuction;
             }
         }
@@ -492,7 +501,10 @@ export class AuctionStore {
                         value.rules.roundDurationMs < 1 ||
                         !isFiniteNonNegativeInteger(value.rules.maxSlavesPerMaster) ||
                         value.rules.maxSlavesPerMaster < 1 ||
-                        (value.rules.priorityType !== "fixed" && value.rules.priorityType !== "rotating")
+                        (value.rules.priorityType !== "fixed" && value.rules.priorityType !== "rotating") ||
+                        (value.rules.nominationType !== undefined &&
+                            value.rules.nominationType !== "manual" &&
+                            value.rules.nominationType !== "random")
                     ) {
                         throw new Error(`Persisted rules for "${guildId}/${auctionName}" are invalid.`);
                     }
@@ -512,6 +524,7 @@ export class AuctionStore {
                         roundDurationMs: value.rules.roundDurationMs,
                         maxSlavesPerMaster: value.rules.maxSlavesPerMaster,
                         priorityType: value.rules.priorityType,
+                        nominationType: value.rules.nominationType === "random" ? "random" : "manual",
                         startingPriorityOrder,
                     };
                 }
@@ -613,6 +626,21 @@ export class AuctionStore {
                         throw new Error(`Persisted next-round priority for "${guildId}/${auctionName}" is invalid.`);
                     }
                     hydratedAuction.nextRoundPriorityOrder = nextOrder;
+                }
+                if (value.nextNominatorId !== undefined) {
+                    if (
+                        typeof value.nextNominatorId !== "string" ||
+                        !hydratedAuction.masters.has(value.nextNominatorId)
+                    ) {
+                        throw new Error(`Persisted next nominator for "${guildId}/${auctionName}" is invalid.`);
+                    }
+                    hydratedAuction.nextNominatorId = value.nextNominatorId;
+                } else {
+                    const derivedNominatorId = getNextNominatorId(
+                        hydratedAuction,
+                        hydratedAuction.lastRoundState?.nominatedById,
+                    );
+                    if (derivedNominatorId) hydratedAuction.nextNominatorId = derivedNominatorId;
                 }
 
                 guildMap.set(auctionName, hydratedAuction);

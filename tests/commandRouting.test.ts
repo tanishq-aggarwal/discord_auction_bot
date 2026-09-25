@@ -8,6 +8,7 @@ test("command routing marks only read-only viewer commands as non-mutating", () 
 
     assert.deepEqual(readOnly, ["view-status", "view-participants"]);
     assert.ok(mutating.includes("start-next-round"));
+    assert.ok(mutating.includes("start-next-random-round"));
     assert.ok(mutating.includes("reset"));
     assert.ok(!readOnly.includes("start-next-round"));
 });
@@ -23,5 +24,5 @@ test("command routing assigns the expected access levels", () => {
 test("command routing has unique subcommand names", () => {
     const names = COMMAND_ROUTE_SPECS.map((route) => route.name);
     assert.equal(new Set(names).size, names.length);
-    assert.equal(names.length, 15);
+    assert.equal(names.length, 16);
 });

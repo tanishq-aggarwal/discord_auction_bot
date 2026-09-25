@@ -2,7 +2,12 @@ import { EmbedBuilder, type Client } from "discord.js";
 import type { Auction, RoundState } from "../database/auctionStore.js";
 import { auctions, persistState } from "../database/global.js";
 import { finalizeRoundState } from "../domain/auctionLifecycle.js";
-import { areAllBidsReceived, autoSubmitMissingBids, getNextNominatorId } from "../domain/roundRules.js";
+import {
+    areAllBidsReceived,
+    autoSubmitMissingBids,
+    getNextNominatorId,
+    getNominationType,
+} from "../domain/roundRules.js";
 import {
     BID_REVEAL_DELAY_MS,
     buildAllBidsReceivedEmbed,
@@ -110,8 +115,8 @@ export async function finalizeRound(
             }
         }
 
-        if (auction.status !== "CLOSED") {
-            const nextNominatorId = getNextNominatorId(auction, round.nominatedById);
+        if (auction.status !== "CLOSED" && getNominationType(auction) === "manual") {
+            const nextNominatorId = auction.nextNominatorId ?? getNextNominatorId(auction, round.nominatedById);
             if (nextNominatorId) {
                 await sleep(3000);
                 try {

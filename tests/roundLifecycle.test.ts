@@ -14,9 +14,14 @@ import {
 import {
     computeMaxBidAllowed,
     getNextNominatorId,
+    getNextObligatedMasterId,
+    getNominationType,
     getPriorityOrderForNextRound,
     getRoundWinner,
+    getUnpurchasedSlaves,
     getVisiblePriorityOrder,
+    getNominationCommandMismatch,
+    pickRandomUnpurchasedSlave,
 } from "../src/domain/roundRules.js";
 
 function createAuction(): Auction {
@@ -52,6 +57,30 @@ function createAuction(): Auction {
 function addBid(round: RoundState, masterId: string, amount: number): void {
     round.bids.set(masterId, { amount, isAuto: false, submittedAt: 3 });
 }
+
+test("beginRound uses an optional per-round duration instead of the auction default", () => {
+    const auction = createAuction();
+    const round = beginRound(auction, {
+        nomineeId: "slave-a",
+        nominatedById: "master-a",
+        startedAt: 1_000,
+        roundDurationMs: 15_000,
+    });
+    assert.equal(round.deadline, 16_000);
+    assert.equal(auction.rules?.roundDurationMs, 120_000);
+    clearActiveRound(auction);
+
+    assert.throws(
+        () =>
+            beginRound(auction, {
+                nomineeId: "slave-b",
+                nominatedById: "master-a",
+                startedAt: 1_000,
+                roundDurationMs: 9_000,
+            }),
+        /between 10 and 300 seconds/,
+    );
+});
 
 test("winner selection resolves ties with the round priority", () => {
     const auction = createAuction();
@@ -390,4 +419,148 @@ test("delete clears an active timer before removing the auction", () => {
     assert.equal(auction.currentRoundState, undefined);
     assert.equal(round.timeoutHandle, undefined);
     assert.equal(fired, false);
+});
+
+test("initializeAuction defaults nomination type to manual", () => {
+    const auction = createAuction();
+    assert.equal(auction.rules?.nominationType, "manual");
+    assert.equal(getNominationType(auction), "manual");
+});
+
+test("initializeAuction stores random nomination type", () => {
+    const auction = createAuction();
+    resetAuctionState(auction);
+    initializeAuction(auction, {
+        channelId: "channel",
+        startingBudget: 10,
+        roundDurationMs: 120_000,
+        maxSlavesPerMaster: 2,
+        priorityType: "fixed",
+        nominationType: "random",
+        startingPriorityOrder: ["master-a", "master-b"],
+        startedAt: 3,
+    });
+    assert.equal(auction.rules?.nominationType, "random");
+    assert.equal(getNominationType(auction), "random");
+});
+
+test("random nomination only selects unpurchased slaves", () => {
+    const auction = createAuction();
+    auction.state!.purchases.get("master-a")!.push("slave-a");
+    const remainingIds = new Set(getUnpurchasedSlaves(auction).map((slave) => slave.id));
+    assert.deepEqual([...remainingIds].sort(), ["slave-b", "slave-c"]);
+
+    for (let i = 0; i < 20; i += 1) {
+        const slave = pickRandomUnpurchasedSlave(auction);
+        assert.ok(slave);
+        assert.ok(remainingIds.has(slave.id));
+    }
+
+    auction.state!.purchases.get("master-a")!.push("slave-b");
+    auction.state!.purchases.get("master-b")!.push("slave-c");
+    assert.equal(pickRandomUnpurchasedSlave(auction), null);
+});
+
+test("random obligated master follows the nomination cursor and skips masters who cannot bid 1", () => {
+    const auction: Auction = {
+        id: randomUUID(),
+        guildId: "guild",
+        channelId: null,
+        name: "random-cursor",
+        status: "INIT",
+        createdAt: 1,
+        masters: new Map([
+            ["master-a", { id: "master-a", tag: "a" }],
+            ["master-b", { id: "master-b", tag: "b" }],
+            ["master-c", { id: "master-c", tag: "c" }],
+        ]),
+        slaves: new Map([
+            ["slave-a", { id: "slave-a", tag: "sa", specialty: "Attacker" }],
+            ["slave-b", { id: "slave-b", tag: "sb", specialty: "Base Builder" }],
+            ["slave-c", { id: "slave-c", tag: "sc", specialty: "All Rounder" }],
+        ]),
+    };
+    initializeAuction(auction, {
+        channelId: "channel",
+        startingBudget: 10,
+        roundDurationMs: 120_000,
+        maxSlavesPerMaster: 2,
+        priorityType: "fixed",
+        nominationType: "random",
+        startingPriorityOrder: ["master-a", "master-b", "master-c"],
+        startedAt: 2,
+    });
+
+    assert.equal(auction.nextNominatorId, "master-a");
+    assert.equal(getNextObligatedMasterId(auction), "master-a");
+
+    const first = beginRound(auction, { nomineeId: "slave-a", nominatedById: "master-a", startedAt: 3 });
+    addBid(first, "master-a", 2);
+    addBid(first, "master-b", 0);
+    addBid(first, "master-c", 0);
+    finalizeRoundState(auction, first);
+    assert.equal(auction.nextNominatorId, "master-b");
+    assert.equal(getNextObligatedMasterId(auction), "master-b");
+
+    auction.state!.purchases.set("master-b", ["slave-b", "slave-c"]);
+    assert.equal(getNextObligatedMasterId(auction), "master-c");
+
+    auction.state!.purchases.set("master-b", []);
+    auction.state!.balances.set("master-b", 0);
+    assert.equal(getNextObligatedMasterId(auction), "master-c");
+
+    undoLastRoundState(auction);
+    assert.equal(auction.nextNominatorId, "master-a");
+    assert.equal(getNextObligatedMasterId(auction), "master-a");
+});
+
+test("hydration defaults missing nomination type to manual and preserves random", () => {
+    const source = new AuctionStore();
+    const auction = source.create("guild", "noms");
+    source.addMaster("guild", "noms", "master-a", "a");
+    source.addSlave("guild", "noms", "slave-a", "sa", "Water Boy");
+    initializeAuction(auction, {
+        channelId: "channel",
+        startingBudget: 10,
+        roundDurationMs: 120_000,
+        maxSlavesPerMaster: 1,
+        priorityType: "fixed",
+        nominationType: "random",
+        startingPriorityOrder: ["master-a"],
+    });
+
+    const restoredRandom = new AuctionStore();
+    restoredRandom.hydrate(source.toSerializable());
+    assert.equal(restoredRandom.getByName("guild", "noms")?.rules?.nominationType, "random");
+    assert.equal(restoredRandom.getByName("guild", "noms")?.nextNominatorId, "master-a");
+
+    const serialized = source.toSerializable() as unknown as {
+        guild: { noms: { rules: { nominationType?: string }; nextNominatorId?: string } };
+    };
+    delete serialized.guild.noms.rules.nominationType;
+    delete serialized.guild.noms.nextNominatorId;
+    const restoredDefault = new AuctionStore();
+    restoredDefault.hydrate(serialized);
+    assert.equal(restoredDefault.getByName("guild", "noms")?.rules?.nominationType, "manual");
+    assert.equal(restoredDefault.getByName("guild", "noms")?.nextNominatorId, "master-a");
+});
+
+test("beginRound rejects owned slaves and masters who cannot be obligated", () => {
+    const auction = createAuction();
+    auction.state!.purchases.get("master-a")!.push("slave-a");
+
+    assert.throws(() => beginRound(auction, { nomineeId: "slave-a", nominatedById: "master-b" }), /already owned/);
+
+    auction.state!.balances.set("master-b", 0);
+    assert.throws(() => beginRound(auction, { nomineeId: "slave-b", nominatedById: "master-b" }), /enough budget/);
+});
+
+test("each start-next command is rejected when the auction uses the other nomination type", () => {
+    const auction = createAuction();
+    assert.equal(getNominationCommandMismatch(auction, "random"), "use-manual");
+    assert.equal(getNominationCommandMismatch(auction, "manual"), null);
+
+    auction.rules!.nominationType = "random";
+    assert.equal(getNominationCommandMismatch(auction, "manual"), "use-random");
+    assert.equal(getNominationCommandMismatch(auction, "random"), null);
 });

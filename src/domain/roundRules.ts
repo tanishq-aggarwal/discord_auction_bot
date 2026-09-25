@@ -1,4 +1,5 @@
-import type { Auction, Bid, Master, RoundState } from "../database/auctionStore.js";
+import { randomInt } from "node:crypto";
+import type { Auction, Bid, Master, NominationType, RoundState, Slave } from "../database/auctionStore.js";
 
 export type RoundWinner = {
     winnerId: Master["id"];
@@ -121,6 +122,50 @@ export function getNextNominatorId(auction: Auction, currentNominatorId?: Master
     }
 
     return eligible.find((masterId) => masterId !== currentNominatorId) ?? eligible[0]!;
+}
+
+export function getNominationType(auction: Auction): NominationType {
+    return auction.rules?.nominationType ?? "manual";
+}
+
+export function getNominationCommandMismatch(
+    auction: Auction,
+    command: NominationType,
+): "use-manual" | "use-random" | null {
+    const nominationType = getNominationType(auction);
+    if (command === "manual" && nominationType === "random") return "use-random";
+    if (command === "random" && nominationType === "manual") return "use-manual";
+    return null;
+}
+
+export function getUnpurchasedSlaves(auction: Auction): Slave[] {
+    return Array.from(auction.slaves.values()).filter((slave) => getOwnerId(auction, slave.id) === null);
+}
+
+export function pickRandomUnpurchasedSlave(auction: Auction): Slave | null {
+    const remaining = getUnpurchasedSlaves(auction);
+    if (remaining.length === 0) return null;
+    return remaining[randomInt(remaining.length)] ?? null;
+}
+
+export function canMasterBeObligatedNominator(auction: Auction, masterId: Master["id"]): boolean {
+    return getRemainingSlots(auction, masterId) > 0 && computeMaxBidAllowed(auction, masterId) >= 1;
+}
+
+export function getNextObligatedMasterId(auction: Auction, afterMasterId?: Master["id"]): Master["id"] | null {
+    let candidate =
+        afterMasterId !== undefined
+            ? getNextNominatorId(auction, afterMasterId)
+            : (auction.nextNominatorId ?? getNextNominatorId(auction, auction.lastRoundState?.nominatedById));
+
+    const seen = new Set<Master["id"]>();
+    while (candidate && !seen.has(candidate)) {
+        if (canMasterBeObligatedNominator(auction, candidate)) return candidate;
+        seen.add(candidate);
+        candidate = getNextNominatorId(auction, candidate);
+    }
+
+    return candidate && canMasterBeObligatedNominator(auction, candidate) ? candidate : null;
 }
 
 export function isAuctionSoldOut(auction: Auction): boolean {

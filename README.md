@@ -49,7 +49,9 @@ Rounds active during a restart are restored and their deadlines are rescheduled 
 
 ## Auction policies
 
-- An auction admin chooses the nominating master for each round.
-- The nominating master must bid at least one coin.
+- Auctions start as **manual** or **random** nomination. Use `/auction start-next-round` for manual auctions and `/auction start-next-random-round` for random auctions.
+- Manual auctions let an admin pick the nominated slave and nominating master. Random auctions pick an unpurchased slave and nominate on behalf of the next master in the internal starting-order cursor, unless `nominated_by` overrides that master.
+- The obligated master must still have remaining purchase slots and must bid at least one coin.
+- Random auctions do not announce the next nominator. Manual auctions still do.
 - Fixed tie priority never changes. Rotating tie priority advances after completed rounds.
 - Updating a slave specialty changes that user in every auction in the current Discord server.

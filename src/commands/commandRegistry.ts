@@ -18,6 +18,7 @@ export const COMMAND_ROUTE_SPECS = [
     { name: "start", access: "auction-admin", mutates: true },
     { name: "reset", access: "auction-admin", mutates: true },
     { name: "start-next-round", access: "auction-admin", mutates: true },
+    { name: "start-next-random-round", access: "auction-admin", mutates: true },
     { name: "cancel-current-round", access: "auction-admin", mutates: true },
     { name: "undo-last-round", access: "auction-admin", mutates: true },
     { name: "view-status", access: "public", mutates: false },

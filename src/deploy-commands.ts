@@ -126,6 +126,16 @@ const commands = [
                             { name: "Fixed (default)", value: "fixed" },
                             { name: "Rotating", value: "rotating" },
                         ]),
+                )
+                .addStringOption((opt) =>
+                    opt
+                        .setName("nomination_type")
+                        .setDescription("How slaves are nominated each round")
+                        .setRequired(false)
+                        .setChoices([
+                            { name: "Manual (default)", value: "manual" },
+                            { name: "Random", value: "random" },
+                        ]),
                 ),
         )
         .addSubcommand((sub) =>
@@ -139,7 +149,7 @@ const commands = [
         .addSubcommand((sub) =>
             sub
                 .setName("start-next-round")
-                .setDescription("Start the next round of an auction")
+                .setDescription("Start the next manual-nomination round of an auction")
                 .addStringOption((opt) =>
                     opt.setName("auction_name").setDescription("Auction name").setRequired(true).setAutocomplete(true),
                 )
@@ -154,6 +164,36 @@ const commands = [
                         .setName("nominated_by")
                         .setDescription("Pick the master who nominated this slave")
                         .setRequired(true),
+                )
+                .addIntegerOption((opt) =>
+                    opt
+                        .setName("round_duration")
+                        .setDescription("Round duration in seconds (default 120)")
+                        .setRequired(false)
+                        .setMinValue(10)
+                        .setMaxValue(300),
+                ),
+        )
+        .addSubcommand((sub) =>
+            sub
+                .setName("start-next-random-round")
+                .setDescription("Start the next random-nomination round of an auction")
+                .addStringOption((opt) =>
+                    opt.setName("auction_name").setDescription("Auction name").setRequired(true).setAutocomplete(true),
+                )
+                .addUserOption((opt) =>
+                    opt
+                        .setName("nominated_by")
+                        .setDescription("Override which master this random nomination is on behalf of")
+                        .setRequired(false),
+                )
+                .addIntegerOption((opt) =>
+                    opt
+                        .setName("round_duration")
+                        .setDescription("Round duration in seconds (default 120)")
+                        .setRequired(false)
+                        .setMinValue(10)
+                        .setMaxValue(300),
                 ),
         )
         .addSubcommand((sub) =>

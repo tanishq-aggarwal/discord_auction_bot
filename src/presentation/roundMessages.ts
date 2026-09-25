@@ -4,6 +4,7 @@ import {
     areAllBidsReceived,
     computeMaxBidAllowed,
     getEligibleMasterIdsForRound,
+    getNominationType,
     getRemainingSlots,
     getVisiblePriorityOrder,
 } from "../domain/roundRules.js";
@@ -122,7 +123,9 @@ export function buildBiddingRoundEmbed(auction: Auction, round: RoundState): Emb
         .setDescription(
             `\n\nBidding has been opened for <@${round.nomineeId}>!` +
                 (round.nominatedById
-                    ? `\nNominated by <@${round.nominatedById}>`
+                    ? getNominationType(auction) === "random"
+                        ? `\nNominated on behalf of <@${round.nominatedById}>`
+                        : `\nNominated by <@${round.nominatedById}>`
                     : "") +
                 `\nEnds ${getRelativeDiscordTimestamp(round.deadline)}` +
                 `\n\n\n**Priority Order For Resolving Ties**\n${priorityOrderText}` +

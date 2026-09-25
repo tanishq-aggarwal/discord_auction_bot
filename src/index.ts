@@ -17,6 +17,7 @@ import { removeMaster } from "./commands/remove-master.js";
 import { removeSlave } from "./commands/remove-slave.js";
 import { resetAuction } from "./commands/reset.js";
 import { setAdminRole } from "./commands/set-admin-role.js";
+import { startNextRandomRound } from "./commands/start-next-random-round.js";
 import { handlePlaceBidButton, handlePlaceBidModal, startNextRound } from "./commands/start-next-round.js";
 import { startAuction } from "./commands/start.js";
 import { undoLastRound } from "./commands/undo-last-round.js";
@@ -47,6 +48,7 @@ const commandHandlers = {
     start: startAuction,
     reset: resetAuction,
     "start-next-round": startNextRound,
+    "start-next-random-round": startNextRandomRound,
     "cancel-current-round": cancelCurrentRound,
     "undo-last-round": undoLastRound,
     "view-status": viewStatus,

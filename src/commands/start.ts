@@ -3,7 +3,7 @@ import type { Auction } from "../database/auctionStore.js";
 import { auctions, persistState } from "../database/global.js";
 import { initializeAuction } from "../domain/auctionLifecycle.js";
 import { getNextNominatorId } from "../domain/roundRules.js";
-import { minsToMs, sleep } from "../utils/common.js";
+import { DEFAULT_ROUND_DURATION_SECONDS, secondsToMs, sleep } from "../utils/common.js";
 import { errorReplyBuilder, replyBuilder } from "../utils/discord-utils.js";
 
 function resolveMasterIdFromPriorityToken(auction: Auction, rawToken: string): string | null {
@@ -33,9 +33,11 @@ async function sendAuctionIntroduction(
                 description:
                     `- Each master will start with **${auction.rules?.startingBudget}🪙**` +
                     `\n- Each master can acquire a maximum of **${auction.rules?.maxSlavesPerMaster}** slaves.` +
-                    "\n- Masters nominate in the starting order. Finished masters are skipped. The nominating master must bid at least 1🪙." +
+                    (auction.rules?.nominationType === "random"
+                        ? "\n- Each remaining slave is nominated at random on behalf of the next master in starting order. Finished masters are skipped. The obligated master must bid at least 1🪙. Use `/auction start-next-random-round` for each round."
+                        : "\n- Masters nominate in the starting order. Finished masters are skipped. The nominating master must bid at least 1🪙. Use `/auction start-next-round` for each round.") +
                     "\n- Masters must hold **at least** 1🪙 for each slave they are yet to acquire." +
-                    `\n- Each round can last a maximum of **${Math.round((auction.rules?.roundDurationMs ?? 0) / 60_000)}** minutes. Missing bids are submitted automatically at the minimum amount.` +
+                    `\n- Each round lasts **${Math.round((auction.rules?.roundDurationMs ?? 0) / 1000)}** seconds by default. Missing bids are submitted automatically at the minimum amount.` +
                     `\n- ${auction.rules?.priorityType === "fixed" ? "Ties are resolved using the configured ranking." : "Tie-breaking priority rotates after each completed round."}` +
                     "\n- The auction ends once all slaves have been sold.",
                 footer: "Use the `/auction view-status` command at any time to check the current status.",
@@ -67,7 +69,7 @@ async function sendAuctionIntroduction(
             }),
         );
 
-        const firstNominatorId = getNextNominatorId(auction);
+        const firstNominatorId = auction.rules?.nominationType === "manual" ? getNextNominatorId(auction) : null;
         if (firstNominatorId) {
             await sleep(5000);
             await interaction.followUp(
@@ -86,12 +88,23 @@ export async function startAuction(interaction: ChatInputCommandInteraction): Pr
     const auctionName = interaction.options.getString("auction_name", true);
     const priorityOrder = interaction.options.getString("priority_order", true);
     const priorityType = interaction.options.getString("priority_type", false) ?? "fixed";
+    const nominationType = interaction.options.getString("nomination_type", false) ?? "manual";
     const startingBudget = interaction.options.getInteger("starting_budget", true);
 
     if (startingBudget < 1 || startingBudget > 1000) {
         await interaction.reply(
             errorReplyBuilder({ description: "Starting budget must be between **1** and **1000**." }),
         );
+        return;
+    }
+    if (nominationType !== "manual" && nominationType !== "random") {
+        await interaction.reply(
+            errorReplyBuilder({ description: "Nomination type must be **manual** or **random**." }),
+        );
+        return;
+    }
+    if (priorityType !== "fixed" && priorityType !== "rotating") {
+        await interaction.reply(errorReplyBuilder({ description: "Priority type must be **fixed** or **rotating**." }));
         return;
     }
 
@@ -158,9 +171,10 @@ export async function startAuction(interaction: ChatInputCommandInteraction): Pr
     initializeAuction(auction, {
         channelId: interaction.channelId!,
         startingBudget,
-        roundDurationMs: minsToMs(2),
+        roundDurationMs: secondsToMs(DEFAULT_ROUND_DURATION_SECONDS),
         maxSlavesPerMaster: Math.ceil(auction.slaves.size / auction.masters.size),
-        priorityType: priorityType as "fixed" | "rotating",
+        priorityType,
+        nominationType,
         startingPriorityOrder,
     });
     persistState();

@@ -10,7 +10,6 @@ import {
 } from "discord.js";
 import type { Auction, RoundState } from "../database/auctionStore.js";
 import { auctions, persistState } from "../database/global.js";
-import { beginRound, clearActiveRound } from "../domain/auctionLifecycle.js";
 import {
     areAllBidsReceived,
     computeMaxBidAllowed,
@@ -19,15 +18,16 @@ import {
     getRemainingSlots,
 } from "../domain/roundRules.js";
 import { auctionCustomIds } from "../interactions/auctionCustomIds.js";
-import {
-    buildBiddingRoundEmbed,
-    buildMasterOverviewEmbed,
-    createOverviewActionRow,
-    createRoundActionRow,
-} from "../presentation/roundMessages.js";
-import { editBiddingRoundMessage, finalizeRound, scheduleRoundDeadline } from "../services/roundCoordinator.js";
+import { buildMasterOverviewEmbed, createOverviewActionRow } from "../presentation/roundMessages.js";
+import { editBiddingRoundMessage, finalizeRound } from "../services/roundCoordinator.js";
 import { errorReplyBuilder } from "../utils/discord-utils.js";
 import { getAuctionForCommand } from "./auctionCommandGuards.js";
+import {
+    describeNominationCommandMismatch,
+    describeObligatedMasterError,
+    launchBiddingRound,
+    readOptionalRoundDurationMs,
+} from "./startRoundShared.js";
 
 const EPHEMERAL_OVERVIEW_TTL_MS = 15 * 60 * 1000;
 const pendingOverviewMessages = new Map<string, { messageId: string; token: string; createdAt: number }>();
@@ -93,10 +93,6 @@ function validateBidInteraction(auction: Auction, round: RoundState, masterId: s
     return null;
 }
 
-function setRoundStatusMessageId(round: RoundState, statusMessageId: string): void {
-    round.statusMessageId = statusMessageId;
-}
-
 export async function startNextRound(interaction: ChatInputCommandInteraction): Promise<void> {
     const auctionName = interaction.options.getString("auction_name", true);
     const nominatedSlave = interaction.options.getUser("nominated_slave", true);
@@ -107,6 +103,12 @@ export async function startNextRound(interaction: ChatInputCommandInteraction): 
         requireAuctionChannel: true,
     });
     if (!auction) return;
+
+    const commandMismatch = describeNominationCommandMismatch(auction, "manual");
+    if (commandMismatch) {
+        await interaction.reply(errorReplyBuilder({ description: commandMismatch }));
+        return;
+    }
     if (!auction.slaves.has(nominatedSlave.id)) {
         await interaction.reply(
             errorReplyBuilder({
@@ -115,20 +117,9 @@ export async function startNextRound(interaction: ChatInputCommandInteraction): 
         );
         return;
     }
-    if (!auction.masters.has(nominatedBy.id)) {
-        await interaction.reply(
-            errorReplyBuilder({
-                description: `<@${nominatedBy.id}> is not a master in this auction. Please select a valid nominator.`,
-            }),
-        );
-        return;
-    }
-    if (getRemainingSlots(auction, nominatedBy.id) <= 0) {
-        await interaction.reply(
-            errorReplyBuilder({
-                description: `<@${nominatedBy.id}> already reached the maximum number of purchases. Choose another nominator.`,
-            }),
-        );
+    const obligatedMasterError = describeObligatedMasterError(auction, nominatedBy.id);
+    if (obligatedMasterError) {
+        await interaction.reply(errorReplyBuilder({ description: obligatedMasterError }));
         return;
     }
     const ownerId = getOwnerId(auction, nominatedSlave.id);
@@ -150,47 +141,19 @@ export async function startNextRound(interaction: ChatInputCommandInteraction): 
         return;
     }
 
-    let round;
-    try {
-        round = beginRound(auction, {
-            nomineeId: nominatedSlave.id,
-            nominatedById: nominatedBy.id,
-            nomineeTag: nominatedSlave.tag,
-            nomineeAvatarURL: nominatedSlave.displayAvatarURL(),
-        });
-    } catch {
-        await interaction.reply(
-            errorReplyBuilder({
-                description:
-                    "A round is already in progress. Please wait for it to finish before starting a new round.",
-            }),
-        );
+    const roundDuration = readOptionalRoundDurationMs(interaction);
+    if (roundDuration.error) {
+        await interaction.reply(errorReplyBuilder({ description: roundDuration.error }));
         return;
     }
 
-    persistState();
-
-    try {
-        await interaction.reply({
-            embeds: [buildBiddingRoundEmbed(auction, round)],
-            components: [createRoundActionRow(auction, round)],
-        });
-    } catch (error) {
-        if (auction.currentRoundState === round) {
-            clearActiveRound(auction);
-            persistState();
-        }
-        throw error;
-    }
-
-    if (auction.currentRoundState !== round) return;
-    scheduleRoundDeadline(interaction.client, auction, round);
-    try {
-        setRoundStatusMessageId(round, (await interaction.fetchReply()).id);
-        persistState();
-    } catch (error) {
-        console.warn("[auction:start-round:fetch-status-message]", error);
-    }
+    await launchBiddingRound(interaction, auction, {
+        nomineeId: nominatedSlave.id,
+        nominatedById: nominatedBy.id,
+        nomineeTag: nominatedSlave.tag,
+        nomineeAvatarURL: nominatedSlave.displayAvatarURL(),
+        ...(roundDuration.durationMs !== undefined ? { roundDurationMs: roundDuration.durationMs } : {}),
+    });
 }
 
 export async function handlePlaceBidButton(interaction: ButtonInteraction): Promise<boolean> {
