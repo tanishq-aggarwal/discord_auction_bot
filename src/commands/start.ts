@@ -1,8 +1,9 @@
 import type { ChatInputCommandInteraction } from "discord.js";
 import type { Auction } from "../database/auctionStore.js";
 import { auctions, persistState } from "../database/global.js";
+import { sealedRulesDescription } from "../bidding/sealed/messages.js";
 import { initializeAuction } from "../domain/auctionLifecycle.js";
-import { getNextNominatorId } from "../domain/roundRules.js";
+import { getNextNominatorId } from "../domain/nomination.js";
 import { DEFAULT_ROUND_DURATION_SECONDS, secondsToMs, sleep } from "../utils/common.js";
 import { errorReplyBuilder, replyBuilder } from "../utils/discord-utils.js";
 
@@ -30,16 +31,7 @@ async function sendAuctionIntroduction(
         await interaction.followUp(
             replyBuilder({
                 title: "Rules of the auction",
-                description:
-                    `- Each master will start with **${auction.rules?.startingBudget}🪙**` +
-                    `\n- Each master can acquire a maximum of **${auction.rules?.maxSlavesPerMaster}** slaves.` +
-                    (auction.rules?.nominationType === "random"
-                        ? "\n- Each remaining slave is nominated at random on behalf of the next master in starting order. Finished masters are skipped. The obligated master must bid at least 1🪙. Use `/auction start-next-random-round` for each round."
-                        : "\n- Masters nominate in the starting order. Finished masters are skipped. The nominating master must bid at least 1🪙. Use `/auction start-next-round` for each round.") +
-                    "\n- Masters must hold **at least** 1🪙 for each slave they are yet to acquire." +
-                    `\n- Each round lasts **${Math.round((auction.rules?.roundDurationMs ?? 0) / 1000)}** seconds by default. Missing bids are submitted automatically at the minimum amount.` +
-                    `\n- ${auction.rules?.priorityType === "fixed" ? "Ties are resolved using the configured ranking." : "Tie-breaking priority rotates after each completed round."}` +
-                    "\n- The auction ends once all slaves have been sold.",
+                description: sealedRulesDescription(auction),
                 footer: "Use the `/auction view-status` command at any time to check the current status.",
                 color: "violet-500",
             }),

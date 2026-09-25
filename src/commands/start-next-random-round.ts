@@ -1,13 +1,13 @@
 import type { ChatInputCommandInteraction } from "discord.js";
-import { getNextObligatedMasterId, pickRandomUnpurchasedSlave } from "../domain/roundRules.js";
+import {
+    describeObligatedMasterError,
+    launchSealedRound,
+    readOptionalRoundDurationMs,
+} from "../bidding/sealed/launchRound.js";
+import { getNextObligatedMasterId } from "../bidding/sealed/rules.js";
+import { describeNominationCommandMismatch, pickRandomUnpurchasedSlave } from "../domain/nomination.js";
 import { errorReplyBuilder } from "../utils/discord-utils.js";
 import { getAuctionForCommand } from "./auctionCommandGuards.js";
-import {
-    describeNominationCommandMismatch,
-    describeObligatedMasterError,
-    launchBiddingRound,
-    readOptionalRoundDurationMs,
-} from "./startRoundShared.js";
 
 export async function startNextRandomRound(interaction: ChatInputCommandInteraction): Promise<void> {
     const auctionName = interaction.options.getString("auction_name", true);
@@ -79,7 +79,7 @@ export async function startNextRandomRound(interaction: ChatInputCommandInteract
         console.warn("[auction:start-next-random-round:fetch-nominee]", error);
     }
 
-    await launchBiddingRound(interaction, auction, {
+    await launchSealedRound(interaction, auction, {
         nomineeId: nominatedSlave.id,
         nominatedById,
         nomineeTag,

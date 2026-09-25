@@ -1,13 +1,11 @@
 import { EmbedBuilder, type Client } from "discord.js";
-import type { Auction, RoundState } from "../database/auctionStore.js";
-import { auctions, persistState } from "../database/global.js";
-import { finalizeRoundState } from "../domain/auctionLifecycle.js";
-import {
-    areAllBidsReceived,
-    autoSubmitMissingBids,
-    getNextNominatorId,
-    getNominationType,
-} from "../domain/roundRules.js";
+import type { Auction } from "../../database/auctionStore.js";
+import { auctions, persistState } from "../../database/global.js";
+import { getNextNominatorId, getNominationType } from "../../domain/nomination.js";
+import { sleep } from "../../utils/common.js";
+import { colorsMap, replyBuilder } from "../../utils/discord-utils.js";
+import { finalizeSealedRound } from "./roundLifecycle.js";
+import { areAllBidsReceived, autoSubmitMissingBids } from "./rules.js";
 import {
     BID_REVEAL_DELAY_MS,
     buildAllBidsReceivedEmbed,
@@ -15,17 +13,21 @@ import {
     buildNextNominatorEmbed,
     buildRoundRevealEmbed,
     createRoundActionRow,
-} from "../presentation/roundMessages.js";
-import { sleep } from "../utils/common.js";
-import { colorsMap, replyBuilder } from "../utils/discord-utils.js";
+} from "./messages.js";
+import type { SealedRoundState } from "./types.js";
+import { isSealedRound } from "./types.js";
 
-const finalizingRounds = new WeakSet<RoundState>();
+const finalizingRounds = new WeakSet<SealedRoundState>();
 
-function isRoundStillActive(auction: Auction, round: RoundState): boolean {
+function isRoundStillActive(auction: Auction, round: SealedRoundState): boolean {
     return auction.currentRoundState === round;
 }
 
-export async function editBiddingRoundMessage(client: Client, auction: Auction, round: RoundState): Promise<void> {
+export async function editBiddingRoundMessage(
+    client: Client,
+    auction: Auction,
+    round: SealedRoundState,
+): Promise<void> {
     if (!isRoundStillActive(auction, round) || !auction.channelId || !round.statusMessageId) return;
 
     const channel = await client.channels.fetch(auction.channelId);
@@ -42,7 +44,7 @@ export async function editBiddingRoundMessage(client: Client, auction: Auction, 
 export async function finalizeRound(
     client: Client,
     auction: Auction,
-    round: RoundState,
+    round: SealedRoundState,
     autoFillMissingBids: boolean,
 ): Promise<void> {
     if (!isRoundStillActive(auction, round) || finalizingRounds.has(round)) return;
@@ -88,7 +90,7 @@ export async function finalizeRound(
         await sleep(BID_REVEAL_DELAY_MS);
         if (!isRoundStillActive(auction, round)) return;
 
-        const winner = finalizeRoundState(auction, round);
+        const winner = finalizeSealedRound(auction, round);
         persistState();
 
         if (!channel?.isTextBased() || !("send" in channel)) return;
@@ -147,7 +149,7 @@ export async function finalizeRound(
     }
 }
 
-export function scheduleRoundDeadline(client: Client, auction: Auction, round: RoundState): void {
+export function scheduleRoundDeadline(client: Client, auction: Auction, round: SealedRoundState): void {
     if (round.timeoutHandle) clearTimeout(round.timeoutHandle);
     const delayMs = Math.max(0, round.deadline - Date.now());
     round.timeoutHandle = setTimeout(() => {
@@ -158,10 +160,11 @@ export function scheduleRoundDeadline(client: Client, auction: Auction, round: R
     }, delayMs);
 }
 
-export function resumePersistedRounds(client: Client): void {
+export function resumePersistedSealedRounds(client: Client): void {
     for (const auction of auctions.listAll()) {
-        if (auction.status === "LIVE" && auction.currentRoundState) {
-            scheduleRoundDeadline(client, auction, auction.currentRoundState);
+        const round = auction.currentRoundState;
+        if (auction.status === "LIVE" && round && isSealedRound(round)) {
+            scheduleRoundDeadline(client, auction, round);
         }
     }
 }

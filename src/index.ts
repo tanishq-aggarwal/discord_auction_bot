@@ -18,7 +18,8 @@ import { removeSlave } from "./commands/remove-slave.js";
 import { resetAuction } from "./commands/reset.js";
 import { setAdminRole } from "./commands/set-admin-role.js";
 import { startNextRandomRound } from "./commands/start-next-random-round.js";
-import { handlePlaceBidButton, handlePlaceBidModal, startNextRound } from "./commands/start-next-round.js";
+import { startNextRound } from "./commands/start-next-round.js";
+import { handleBidButton, handleBidModal, resumePersistedRounds } from "./bidding/dispatch.js";
 import { startAuction } from "./commands/start.js";
 import { undoLastRound } from "./commands/undo-last-round.js";
 import { updateSlaveSpecialty } from "./commands/update-slave-specialty.js";
@@ -26,7 +27,6 @@ import { viewParticipants } from "./commands/view-participants.js";
 import { viewStatus } from "./commands/view-status.js";
 import { requireEnvironmentVariable } from "./config.js";
 import { auctions, persistState } from "./database/global.js";
-import { resumePersistedRounds } from "./services/roundCoordinator.js";
 import { isServerAdmin, verifyAuctionAdmin } from "./utils/auth.js";
 import { errorReplyBuilder } from "./utils/discord-utils.js";
 
@@ -176,9 +176,9 @@ async function handleInteractionSafely(interaction: Interaction): Promise<void> 
             shouldPersist = route?.mutates ?? false;
             await handleChatInputInteraction(interaction, route);
         } else if (interaction.isButton()) {
-            await handlePlaceBidButton(interaction);
+            await handleBidButton(interaction);
         } else if (interaction.isModalSubmit()) {
-            shouldPersist = await handlePlaceBidModal(interaction);
+            shouldPersist = await handleBidModal(interaction);
         }
     } catch (error) {
         console.error("[interaction:unhandled]", error);

@@ -13,7 +13,7 @@ function parseCustomId(customId: string, prefix: string): string | null {
     return auctionId || null;
 }
 
-export const auctionCustomIds = {
+export const sealedCustomIds = {
     openBidOverview: {
         build: (auctionId: string) => buildCustomId(OPEN_BID_OVERVIEW_PREFIX, auctionId),
         parse: (customId: string) => parseCustomId(customId, OPEN_BID_OVERVIEW_PREFIX),
@@ -27,3 +27,11 @@ export const auctionCustomIds = {
         parse: (customId: string) => parseCustomId(customId, BID_MODAL_PREFIX),
     },
 } as const;
+
+export function isSealedCustomId(customId: string): boolean {
+    return (
+        sealedCustomIds.openBidOverview.parse(customId) !== null ||
+        sealedCustomIds.placeBid.parse(customId) !== null ||
+        sealedCustomIds.bidModal.parse(customId) !== null
+    );
+}

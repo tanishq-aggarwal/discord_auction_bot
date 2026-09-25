@@ -1,5 +1,5 @@
 import type { ChatInputCommandInteraction } from "discord.js";
-import { undoLastRoundState } from "../domain/auctionLifecycle.js";
+import { undoLastRound as undoLastRoundState } from "../bidding/dispatch.js";
 import { errorReplyBuilder, replyBuilder } from "../utils/discord-utils.js";
 import { getAuctionForCommand } from "./auctionCommandGuards.js";
 

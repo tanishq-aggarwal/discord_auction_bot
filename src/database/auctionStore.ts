@@ -1,25 +1,12 @@
 import { randomUUID, type UUID } from "node:crypto";
-import { clearActiveRound } from "../domain/auctionLifecycle.js";
-import { getNextNominatorId } from "../domain/roundRules.js";
+import { hydrateSealedRound, serializeSealedRound } from "../bidding/sealed/persistence.js";
+import { readBiddingStyle, type BiddingStyle } from "../bidding/style.js";
+import { getNextNominatorId } from "../domain/nomination.js";
+import { discardActiveRound, type RoundActivity } from "../domain/roundActivity.js";
 import { isSlaveSpecialty, type SlaveSpecialty } from "../domain/specialties.js";
 import type { epochMilliseconds, milliseconds } from "../utils/common.js";
 
 export type AuctionStatus = "INIT" | "LIVE" | "CLOSED";
-
-export type Bid = { amount: number; isAuto: boolean; submittedAt: epochMilliseconds };
-
-export type RoundState = {
-    nomineeId: Slave["id"];
-    nominatedById?: Master["id"];
-    nomineeTag?: string;
-    nomineeAvatarURL?: string;
-    startedAt: epochMilliseconds;
-    deadline: epochMilliseconds;
-    priorityOrder: Master["id"][];
-    statusMessageId?: string;
-    bids: Map<Master["id"], Bid>;
-    timeoutHandle?: NodeJS.Timeout;
-};
 
 export type NominationType = "manual" | "random";
 
@@ -52,12 +39,14 @@ export type Auction = {
 
     /** Gets set when auction is started */
     rules?: AuctionRules;
+    /** Gets set when auction is started. Sealed bidding is the only style implemented today. */
+    biddingStyle?: BiddingStyle;
     /** Gets set when auction is started */
     state?: AuctionState;
-    /** Gets set whenever a round is started */
-    currentRoundState?: RoundState;
-    lastRoundState?: RoundState;
-    /** Used to replay the same tie priority after a cancelled or undone round. */
+    /** Gets set whenever a round is started. Style-specific fields live on the round object. */
+    currentRoundState?: RoundActivity;
+    lastRoundState?: RoundActivity;
+    /** Sealed bidding only. Replays the same tie priority after a cancelled or undone round. */
     nextRoundPriorityOrder?: Master["id"][];
     /** Next master in starting-order nomination, used for announcements and random obligation. */
     nextNominatorId?: Master["id"];
@@ -72,10 +61,6 @@ export type Slave = DiscordUser & {
     specialty: SlaveSpecialty;
 };
 
-type SerializableRoundState = Omit<RoundState, "bids" | "timeoutHandle"> & {
-    bids: Array<[Master["id"], Bid]>;
-};
-
 type SerializableAuctionState = Omit<AuctionState, "balances" | "purchases"> & {
     balances: Array<[Master["id"], number]>;
     purchases: Array<[Master["id"], Slave["id"][]]>;
@@ -85,8 +70,8 @@ type SerializableAuction = Omit<Auction, "slaves" | "masters" | "state" | "curre
     slaves: Array<[Slave["id"], Slave]>;
     masters: Array<[Master["id"], Master]>;
     state?: SerializableAuctionState;
-    currentRoundState?: SerializableRoundState;
-    lastRoundState?: SerializableRoundState;
+    currentRoundState?: ReturnType<typeof serializeSealedRound>;
+    lastRoundState?: ReturnType<typeof serializeSealedRound>;
 };
 
 type SerializableAuctionsByGuild = Record<Auction["guildId"], Record<Auction["name"], SerializableAuction>>;
@@ -130,68 +115,6 @@ function readEntityEntries<T extends DiscordUser>(
         }
         return [entry[0], entity as T];
     });
-}
-
-function hydrateRoundState(value: unknown, auction: Auction, label: string): RoundState {
-    if (!isRecord(value)) {
-        throw new Error(`${label} must be an object.`);
-    }
-    if (
-        typeof value.nomineeId !== "string" ||
-        !auction.slaves.has(value.nomineeId) ||
-        !isFiniteNonNegativeInteger(value.startedAt) ||
-        !isFiniteNonNegativeInteger(value.deadline)
-    ) {
-        throw new Error(`${label} has invalid identity or timestamps.`);
-    }
-    if (
-        value.nominatedById !== undefined &&
-        (typeof value.nominatedById !== "string" || !auction.masters.has(value.nominatedById))
-    ) {
-        throw new Error(`${label} has an invalid nominator.`);
-    }
-
-    const priorityOrder = readStringArray(value.priorityOrder, `${label}.priorityOrder`);
-    if (priorityOrder.some((masterId) => !auction.masters.has(masterId))) {
-        throw new Error(`${label}.priorityOrder contains an unknown master.`);
-    }
-    if (!Array.isArray(value.bids)) {
-        throw new Error(`${label}.bids must be an array.`);
-    }
-
-    const bids = new Map<Master["id"], Bid>();
-    for (const [index, entry] of value.bids.entries()) {
-        if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== "string" || !isRecord(entry[1])) {
-            throw new Error(`${label}.bids[${index}] is invalid.`);
-        }
-        const [masterId, bid] = entry;
-        if (
-            !auction.masters.has(masterId) ||
-            !isFiniteNonNegativeInteger(bid.amount) ||
-            typeof bid.isAuto !== "boolean" ||
-            !isFiniteNonNegativeInteger(bid.submittedAt)
-        ) {
-            throw new Error(`${label}.bids[${index}] contains invalid bid data.`);
-        }
-        bids.set(masterId, {
-            amount: bid.amount,
-            isAuto: bid.isAuto,
-            submittedAt: bid.submittedAt,
-        });
-    }
-
-    const round: RoundState = {
-        nomineeId: value.nomineeId,
-        startedAt: value.startedAt,
-        deadline: value.deadline,
-        priorityOrder,
-        bids,
-    };
-    if (value.nominatedById !== undefined) round.nominatedById = value.nominatedById;
-    if (typeof value.nomineeTag === "string") round.nomineeTag = value.nomineeTag;
-    if (typeof value.nomineeAvatarURL === "string") round.nomineeAvatarURL = value.nomineeAvatarURL;
-    if (typeof value.statusMessageId === "string") round.statusMessageId = value.statusMessageId;
-    return round;
 }
 
 export class AuctionStore {
@@ -351,7 +274,7 @@ export class AuctionStore {
             throw new Error(`Auction **${auctionName}** not found.`);
         }
 
-        clearActiveRound(auction, false);
+        discardActiveRound(auction);
 
         guildMap.delete(auctionName);
         if (guildMap.size === 0) {
@@ -396,6 +319,9 @@ export class AuctionStore {
                     slaves: Array.from(auction.slaves.entries()),
                     masters: Array.from(auction.masters.entries()),
                 };
+                if (auction.biddingStyle) {
+                    serializedAuction.biddingStyle = auction.biddingStyle;
+                }
                 if (auction.rules) {
                     serializedAuction.rules = auction.rules;
                 }
@@ -407,20 +333,10 @@ export class AuctionStore {
                     };
                 }
                 if (auction.currentRoundState) {
-                    const roundWithoutTimeout = { ...auction.currentRoundState };
-                    delete roundWithoutTimeout.timeoutHandle;
-                    serializedAuction.currentRoundState = {
-                        ...roundWithoutTimeout,
-                        bids: Array.from(auction.currentRoundState.bids.entries()),
-                    };
+                    serializedAuction.currentRoundState = serializeSealedRound(auction.currentRoundState);
                 }
                 if (auction.lastRoundState) {
-                    const lastRoundWithoutTimeout = { ...auction.lastRoundState };
-                    delete lastRoundWithoutTimeout.timeoutHandle;
-                    serializedAuction.lastRoundState = {
-                        ...lastRoundWithoutTimeout,
-                        bids: Array.from(auction.lastRoundState.bids.entries()),
-                    };
+                    serializedAuction.lastRoundState = serializeSealedRound(auction.lastRoundState);
                 }
                 if (auction.nextRoundPriorityOrder) {
                     serializedAuction.nextRoundPriorityOrder = [...auction.nextRoundPriorityOrder];
@@ -603,15 +519,16 @@ export class AuctionStore {
                     );
                 }
 
+                hydratedAuction.biddingStyle = readBiddingStyle(value.biddingStyle);
                 if (value.lastRoundState !== undefined) {
-                    hydratedAuction.lastRoundState = hydrateRoundState(
+                    hydratedAuction.lastRoundState = hydrateSealedRound(
                         value.lastRoundState,
                         hydratedAuction,
                         `${guildId}/${auctionName}.lastRoundState`,
                     );
                 }
                 if (value.currentRoundState !== undefined) {
-                    hydratedAuction.currentRoundState = hydrateRoundState(
+                    hydratedAuction.currentRoundState = hydrateSealedRound(
                         value.currentRoundState,
                         hydratedAuction,
                         `${guildId}/${auctionName}.currentRoundState`,

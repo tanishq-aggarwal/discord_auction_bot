@@ -1,15 +1,12 @@
 import type { ChatInputCommandInteraction, InteractionReplyOptions } from "discord.js";
-import type { Auction } from "../database/auctionStore.js";
-import { persistState } from "../database/global.js";
-import { beginRound, clearActiveRound, type BeginRoundInput } from "../domain/auctionLifecycle.js";
-import {
-    canMasterBeObligatedNominator,
-    getNominationCommandMismatch,
-    getNominationType,
-} from "../domain/roundRules.js";
-import { createRoundActionRow, buildBiddingRoundEmbed } from "../presentation/roundMessages.js";
-import { scheduleRoundDeadline } from "../services/roundCoordinator.js";
-import { errorReplyBuilder } from "../utils/discord-utils.js";
+import type { Auction } from "../../database/auctionStore.js";
+import { persistState } from "../../database/global.js";
+import { errorReplyBuilder } from "../../utils/discord-utils.js";
+import { scheduleRoundDeadline } from "./coordinator.js";
+import { buildBiddingRoundEmbed, createRoundActionRow } from "./messages.js";
+import { beginSealedRound, clearSealedRound, type BeginRoundInput } from "./roundLifecycle.js";
+import { canMasterBeObligatedNominator } from "./rules.js";
+import { getNominationType } from "../../domain/nomination.js";
 
 export const MIN_ROUND_DURATION_SECONDS = 10;
 export const MAX_ROUND_DURATION_SECONDS = 300;
@@ -29,17 +26,6 @@ export function readOptionalRoundDurationMs(
         };
     }
     return { durationMs: roundDurationSeconds * 1000 };
-}
-
-export function describeNominationCommandMismatch(auction: Auction, command: "manual" | "random"): string | null {
-    const mismatch = getNominationCommandMismatch(auction, command);
-    if (mismatch === "use-random") {
-        return `Auction **${auction.name}** uses random nomination. Use \`/auction start-next-random-round\` instead.`;
-    }
-    if (mismatch === "use-manual") {
-        return `Auction **${auction.name}** uses manual nomination. Use \`/auction start-next-round\` instead.`;
-    }
-    return null;
 }
 
 export function describeObligatedMasterError(auction: Auction, masterId: string): string | null {
@@ -69,14 +55,14 @@ async function respondToCommand(
     await interaction.reply(payload);
 }
 
-export async function launchBiddingRound(
+export async function launchSealedRound(
     interaction: ChatInputCommandInteraction,
     auction: Auction,
     input: BeginRoundInput,
 ): Promise<void> {
     let round;
     try {
-        round = beginRound(auction, input);
+        round = beginSealedRound(auction, input);
     } catch (error) {
         const description =
             error instanceof Error && error.message === "A round is already active."
@@ -97,7 +83,7 @@ export async function launchBiddingRound(
         });
     } catch (error) {
         if (auction.currentRoundState === round) {
-            clearActiveRound(auction);
+            clearSealedRound(auction);
             persistState();
         }
         throw error;
